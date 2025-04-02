@@ -90,6 +90,21 @@ impl Lemon {
         unsafe { lemon::ReportOutput(&mut self.inner) }; 
     }
 
+    pub fn token_classes(&self) -> Vec<String> {
+        let classes = unsafe { std::slice::from_raw_parts(self.inner.symbols, self.inner.nsymbol as usize) }.into_iter()
+            .filter_map(|&symbol| match unsafe { *symbol } {
+                sym if sym.bContent == 1 => {
+                    Some(vec![Symbol::from_raw(symbol).name()])
+                }
+                _ => None
+            })
+            .flatten()
+            .collect::<std::collections::BTreeSet<_>>()
+        ;
+        
+        Vec::from_iter(classes.into_iter())
+    }
+
     pub fn rules(&self) -> Vec<RuleChoice> {
         let mut rule_indexes = vec![];
         let mut processsed = std::collections::HashSet::new();
@@ -126,25 +141,25 @@ impl serde::Serialize for Lemon {
     where S: serde::Serializer 
     {
         use serde::ser::SerializeStruct;
-        let mut state = serializer.serialize_struct("grammar", 2)?;
+        let mut state = serializer.serialize_struct("grammar", 3)?;
 
         let symbols = unsafe { std::slice::from_raw_parts(self.inner.symbols, self.inner.nsymbol as usize) }.into_iter()
             .map(|&x| Symbol::from_raw(x))
             .collect::<Vec<_>>()
         ;
 
+        state.serialize_field("classes", &self.token_classes())?;
         state.serialize_field("symbols", &symbols)?;
         state.serialize_field("rules", &self.rules())?;
         state.end()
     }
 }
 
-#[repr(u32)]
 #[derive(serde::Serialize)]
 enum SymbolType {
     Terminal,
     NonTerminal,
-    MultiTerminal(Vec<String>),
+    MultiTerminal{ classes: Vec<String>},
 }
 
 #[derive(serde::Serialize)]
@@ -189,8 +204,8 @@ impl Symbol {
                 SymbolType::NonTerminal
             }
             lemon::symbol_type_MULTITERMINAL => {
-                let names = self.additional_names();
-                SymbolType::MultiTerminal(names)
+                let classes = self.additional_names();
+                SymbolType::MultiTerminal{ classes }
             }
             n => panic!("unexpected symbol type value ({n})"),
         }
@@ -249,7 +264,7 @@ impl serde::Serialize for Rule {
     {
         let mut state = serializer.serialize_struct("rule", 10)?;
         state.serialize_field("index", &(unsafe { *self.inner }).index)?;
-        state.serialize_field("choices", &self.rhs())?;
+        state.serialize_field("sequences", &self.rhs())?;
         state.end()
     }
 }
@@ -276,8 +291,14 @@ impl RuleChoice {
 }
 
 #[derive(serde::Serialize)]
+enum Term {
+    Symbol {name: String},
+    Class { members: Vec<String> },
+}
+
+#[derive(serde::Serialize)]
 struct Rhs {
-    name: String,
+    token: Term,
     alias: Option<String>,
 }
 
@@ -292,6 +313,13 @@ impl Rhs {
             true => None,
         };
 
-        Self { name, alias }
+        unsafe { 
+            let sym = *symbol;
+            if (sym.type_ == 2) && (sym.useCnt == 0)  {
+                return Self { token: Term::Class { members: Symbol::from_raw(symbol).additional_names() }, alias };
+            }
+        }
+
+        Self { token: Term::Symbol {name}, alias }
     }
 }

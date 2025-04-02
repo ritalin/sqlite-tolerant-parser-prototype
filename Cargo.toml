@@ -3,6 +3,10 @@ name = "sqlite-parser-proto"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "grammar_converter"
+path = "src/bin/grammar_converter/main.rs"
+
 [dependencies]
 anyhow = "1.0.97"
 cc = "1.2.17"
