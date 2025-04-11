@@ -16,13 +16,19 @@ name = "parsing_state"
 path = "src/bin/parsing_state/main.rs"
 
 [[bin]]
+name = "parsing_tree"
+path = "src/bin/parsing_tree/main.rs"
+
+[[bin]]
 name = "scanner"
 path = "src/bin/scanner/main.rs"
 
 [dependencies]
 anyhow = "1.0.97"
 cc = "1.2.17"
+cstree = "0.12.2"
 lalry = "0.1.0"
+phf = { version = "0.11.3", features = ["macros"] }
 regex = "1.11.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
