@@ -2,7 +2,7 @@ pub mod binding;
 
 #[derive(serde::Deserialize)]
 pub struct Grammar {
-    pub start: String,
+    // pub start: String,
     pub symbols: Vec<GrammarSymbol>,
     pub rules: Vec<GrammarRule>,
 }

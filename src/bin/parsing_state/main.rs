@@ -48,7 +48,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     let start_symbol = "program".to_string();
     let eof_symbol = GrammarSymbol { id: terminals.len() + 1, name: "EOF".into(), symbol_type: SymbolType::NonTerminal, precedence: None };
     rules.insert(start_symbol.clone(), vec![
-        lalry::Rhs{ syms: vec![lalry::Symbol::Nonterminal(gramer_rule.start.clone()) , lalry::Symbol::Terminal(eof_symbol)], act: RuleId { id: rules.len() } }
+        lalry::Rhs{ syms: vec![lalry::Symbol::Nonterminal(start_symbol.clone()) , lalry::Symbol::Terminal(eof_symbol)], act: RuleId { id: rules.len() } }
     ]);
 
     let grammar = lalry::Grammar {
