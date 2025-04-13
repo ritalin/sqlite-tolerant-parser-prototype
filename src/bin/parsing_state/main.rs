@@ -1,6 +1,6 @@
 use std::{collections::{BTreeMap, HashMap, LinkedList}, fmt::Debug};
 
-use sqlite_parser_proto::{Grammar, GrammarRule, GrammarRuleMember, GrammarSymbol, Precedence, SymbolRef, SymbolType};
+use sqlite_parser_proto::{Grammar, GrammarRule, GrammarRuleMember, GrammarSymbol, Precedence, RuleId, SymbolRef, SymbolType};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let gramer_rule = serde_json::from_str::<Grammar>(include_str!("../../../build/grammar.json"))?;
@@ -98,8 +98,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         }
     })?;
 
-    // dump_parse_table(&table);
-    test_parse(&table);
+    dump_parse_table(&table, &gramer_rule.symbols);
+    // test_parse(&table);
 
     Ok(())
 }
@@ -116,12 +116,14 @@ fn dump_grammar(grammar: &lalry::Grammar<GrammarSymbol, String, RuleId>) {
 }
 
 #[allow(unused)]
-fn dump_parse_table<'a>(table: &lalry::LR1ParseTable<'a, GrammarSymbol, String, RuleId>) {
+fn dump_parse_table<'a>(table: &lalry::LR1ParseTable<'a, GrammarSymbol, String, RuleId>, symbols: &[GrammarSymbol]) {
+    let lookup = symbols.iter().map(|x| (x.name.clone(), x.id)).collect::<HashMap<_, _>>();
+
     for (i, state) in table.states.iter().enumerate() {
         println!("#{:<5} EOF: {:?}", i, state.eof);
         println!("#{:<5} Goto tables/len: {}", i, state.goto.len());
         for (j, (symbol, dest)) in state.goto.iter().enumerate() {
-            println!("  ##{:<6} {} -> {}", j, symbol, dest);
+            println!("  ##{:<6} {} ({:?}) -> {}", j, symbol, lookup.get(*symbol), dest);
         }
 
         println!("--------------------------------------------------------------------------------");
@@ -179,9 +181,10 @@ fn test_parse<'a>(table: &lalry::LR1ParseTable<'a, GrammarSymbol, String, RuleId
                 ;
                 value_stack.push_back(format!("Node({})", values.join(",")));
 
-                let next_state = table.states[*state_stack.back().unwrap()].goto.get(lhs).expect("Missing goto");
+                let peek = *state_stack.back().unwrap();
+                let next_state = table.states[peek].goto.get(lhs).expect("Missing goto");
                 state_stack.push_back(*next_state);
-                println!("** Reduce/state: {}, name: {}, rhs/len: {}, goto: {}", current_state, lhs, rhs.syms.len(), next_state);
+                println!("** Reduce/state: {}, name: {}, rhs/len: {}, goto: {} -> {}", current_state, lhs, rhs.syms.len(), peek, next_state);
             }
             Some(lalry::LRAction::Accept) => {
                 let result = value_stack.pop_back();
@@ -430,22 +433,5 @@ impl<'a, T, N, A> lalry::Config<'a, T, N, A> for ActionResolveConfig
         }
 
         0
-    }
-}
-
-#[derive(Debug)]
-struct RuleId {
-    id: usize,
-}
-
-impl RuleId {
-    pub fn new(id: usize) -> Self {
-        Self { id }
-    }
-}
-
-impl SymbolRef for RuleId {
-    fn id(&self) -> usize {
-        self.id
     }
 }

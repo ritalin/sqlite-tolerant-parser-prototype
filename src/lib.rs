@@ -101,3 +101,20 @@ impl PartialOrd for Precedence {
         rhs_score.partial_cmp(&lhs_score)
     }
 }
+
+#[derive(Debug)]
+pub struct RuleId {
+    pub id: usize,
+}
+
+impl RuleId {
+    pub fn new(id: usize) -> Self {
+        Self { id }
+    }
+}
+
+impl SymbolRef for RuleId {
+    fn id(&self) -> usize {
+        self.id
+    }
+}
