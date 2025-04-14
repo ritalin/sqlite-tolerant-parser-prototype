@@ -3,6 +3,11 @@ name = "sqlite-parser-proto"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = [
+    "crates/generate",
+]
+
 [[bin]]
 name = "grammar_converter"
 path = "src/bin/grammar_converter/main.rs"
@@ -24,6 +29,10 @@ name = "parser_engine"
 path = "src/bin/parser_engine/main.rs"
 
 [[bin]]
+name = "parser_engine2"
+path = "src/bin/parser_engine2/main.rs"
+
+[[bin]]
 name = "scanner"
 path = "src/bin/scanner/main.rs"
 
@@ -32,6 +41,8 @@ anyhow = "1.0.97"
 lalry = "0.1.0"
 phf = { version = "0.11.3", features = ["macros"] }
 serde_json = "1.0.140"
+quote = "1.0.40"
+proc-macro2 = "1.0.94"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -40,6 +51,8 @@ cstree = "0.12.2"
 lalry = { workspace = true }
 maplit = "1.0.2"
 phf = { workspace = true }
+proc-macro2 = { workspace = true }
+quote = { workspace = true }
 regex = "1.11.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = { workspace = true }
@@ -52,3 +65,4 @@ cc = "1.0"
 [features]
 keyword_matcher = []
 grammar_converter = []
+parser_generated = []

@@ -126,6 +126,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "generate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "lalry",
+ "prettyplease",
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "sqlite-parser-proto",
+ "syn",
+]
+
+[[package]]
 name = "glob"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -295,9 +309,9 @@ dependencies = [
 
 [[package]]
 name = "prettyplease"
-version = "0.2.31"
+version = "0.2.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5316f57387668042f561aae71480de936257848f9c43ce528e311d89a07cadeb"
+checksum = "664ec5419c51e34154eec046ebcba56312d5a2fc3b09a06da188e1ad21afadf6"
 dependencies = [
  "proc-macro2",
  "syn",
@@ -459,6 +473,8 @@ dependencies = [
  "lalry",
  "maplit",
  "phf",
+ "proc-macro2",
+ "quote",
  "regex",
  "serde",
  "serde_json",

@@ -1,4 +1,5 @@
 pub mod binding;
+pub mod engine;
 
 #[derive(serde::Deserialize)]
 pub struct Grammar {
@@ -15,12 +16,12 @@ pub enum SymbolType {
 }
 
 pub trait SymbolRef {
-    fn id(&self) -> usize;
+    fn id(&self) -> u32;
 }
 
 #[derive(Eq, Ord, Clone, Debug, serde::Deserialize)]
 pub struct GrammarSymbol {
-    pub id: usize,
+    pub id: u32,
     pub name: String,
     #[serde(alias = "type")]
     pub symbol_type: SymbolType,
@@ -40,7 +41,7 @@ impl PartialOrd for GrammarSymbol {
 }
 
 impl SymbolRef for GrammarSymbol {
-    fn id(&self) -> usize {
+    fn id(&self) -> u32 {
         self.id
     }
 }
@@ -53,7 +54,7 @@ pub struct GrammarRule {
 
 #[derive(serde::Deserialize)]
 pub struct GrammarRuleMember {
-    pub id: usize,
+    pub id: u32,
     pub sequences: Vec<Rhs>,
     pub precedence: Option<Precedence>,
 }
@@ -104,17 +105,46 @@ impl PartialOrd for Precedence {
 
 #[derive(Debug)]
 pub struct RuleId {
-    pub id: usize,
+    pub id: u32,
 }
 
 impl RuleId {
-    pub fn new(id: usize) -> Self {
+    pub fn new(id: u32) -> Self {
         Self { id }
     }
 }
 
 impl SymbolRef for RuleId {
-    fn id(&self) -> usize {
+    fn id(&self) -> u32 {
         self.id
     }
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Clone, Copy)]
+pub struct SyntaxKind {
+    pub id: u32,
+    pub text: &'static str,
+    pub is_keyword: bool,
+    pub is_terminal: bool,
+}
+
+#[derive(Clone)]
+pub enum LookaheadTransition {
+    Unknown,
+    Shift { next_state: usize },
+    Reduce{ pop_count: usize, lhs: u32 },
+    Accept{ last_state: usize, last_kind: SyntaxKind },
+}
+
+impl Default for LookaheadTransition {
+    fn default() -> Self {
+        LookaheadTransition::Unknown
+    }
+}
+
+pub enum TransitionEvent {
+    Shift { syntax_kind: SyntaxKind, current_state: usize, next_state: usize, input: Option<String> },
+    Reduce{ syntax_kind: SyntaxKind, current_state: usize, next_state: usize, pop_count: usize },
+    Error { syntax_kind: SyntaxKind, failed_state: usize, pop_count: usize, candidate_syntax_kinds: Vec<SyntaxKind> },
+    Accept{ current_state: usize, syntax_kind: SyntaxKind },
 }

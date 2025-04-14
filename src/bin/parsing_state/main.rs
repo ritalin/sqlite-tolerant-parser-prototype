@@ -11,7 +11,7 @@ pub fn main() -> Result<(), anyhow::Error> {
         ("IS".into(), ("ISNOT".into(), vec!["NOT".into(), ]))
     ]);
 
-    let mut id_gen = IdGenerator::new(gramer_rule.rules.iter().map(|rule| rule.members.len()).sum::<usize>());
+    let mut id_gen = IdGenerator::new(gramer_rule.rules.iter().map(|rule| rule.members.len() as u32).sum::<u32>());
 
     let mut rules = gramer_rule.rules.iter()
         .map(|rule| {
@@ -27,7 +27,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     combination_rules.iter()
         .for_each(|(first, (new_name, followings))| {
-            let id = rules.len();
+            let id = rules.len() as u32;
             let internal_syms = [first.clone()].iter().chain(followings)
                 .map(|name| {
                     match terminals.get(name) {
@@ -46,9 +46,9 @@ pub fn main() -> Result<(), anyhow::Error> {
     ;
 
     let start_symbol = "program".to_string();
-    let eof_symbol = GrammarSymbol { id: terminals.len() + 1, name: "EOF".into(), symbol_type: SymbolType::NonTerminal, precedence: None };
+    let eof_symbol = GrammarSymbol { id: (terminals.len() + 1) as u32, name: "EOF".into(), symbol_type: SymbolType::NonTerminal, precedence: None };
     rules.insert(start_symbol.clone(), vec![
-        lalry::Rhs{ syms: vec![lalry::Symbol::Nonterminal(start_symbol.clone()) , lalry::Symbol::Terminal(eof_symbol)], act: RuleId { id: rules.len() } }
+        lalry::Rhs{ syms: vec![lalry::Symbol::Nonterminal(start_symbol.clone()) , lalry::Symbol::Terminal(eof_symbol)], act: RuleId { id: rules.len() as u32 } }
     ]);
 
     let grammar = lalry::Grammar {
@@ -220,25 +220,25 @@ fn create_terminal_lookup(sources: &[GrammarSymbol]) -> HashMap<String, GrammarS
 }
 
 struct IdGenerator {
-    stack: LinkedList<usize>,
-    next: usize,
+    stack: LinkedList<u32>,
+    next: u32,
 }
 
 impl IdGenerator {
-    pub fn new(next_id: usize) -> Self {
+    pub fn new(next_id: u32) -> Self {
         Self {
             stack: LinkedList::new(),
             next: next_id,
         }
     }
 
-    pub fn set_current(&mut self, id: usize) {
+    pub fn set_current(&mut self, id: u32) {
         self.stack.push_back(id);
     }
     pub fn flush(&mut self) {
         self.stack.clear();
     }
-    pub fn id(&mut self) -> usize {
+    pub fn id(&mut self) -> u32 {
         match self.stack.pop_back() {
             Some(id) => id,
             None => {
@@ -250,7 +250,7 @@ impl IdGenerator {
     }
 }
 
-fn create_symbols(rule: &GrammarRuleMember, terminals: &HashMap<String, GrammarSymbol>, combination_rules: &HashMap<String, (String, Vec<String>)>, id_gen: &mut IdGenerator) -> Vec<(usize, Vec<lalry::Symbol<GrammarSymbol, String>>)> {
+fn create_symbols(rule: &GrammarRuleMember, terminals: &HashMap<String, GrammarSymbol>, combination_rules: &HashMap<String, (String, Vec<String>)>, id_gen: &mut IdGenerator) -> Vec<(u32, Vec<lalry::Symbol<GrammarSymbol, String>>)> {
     let mut symbols = vec![];
     let mut symbol = vec![];
     id_gen.set_current(rule.id);
@@ -260,7 +260,7 @@ fn create_symbols(rule: &GrammarRuleMember, terminals: &HashMap<String, GrammarS
     symbols
 }
 
-fn create_symbols_internal(sequences: &[sqlite_parser_proto::Rhs], terminals: &HashMap<String, GrammarSymbol>, combination_rules: &HashMap<String, (String, Vec<String>)>, id_gen: &mut IdGenerator, current: &mut Vec<lalry::Symbol<GrammarSymbol, String>>, symbols: &mut Vec<(usize, Vec<lalry::Symbol<GrammarSymbol, String>>)>) {
+fn create_symbols_internal(sequences: &[sqlite_parser_proto::Rhs], terminals: &HashMap<String, GrammarSymbol>, combination_rules: &HashMap<String, (String, Vec<String>)>, id_gen: &mut IdGenerator, current: &mut Vec<lalry::Symbol<GrammarSymbol, String>>, symbols: &mut Vec<(u32, Vec<lalry::Symbol<GrammarSymbol, String>>)>) {
     match sequences.get(0) {
         None => {
             symbols.push((id_gen.id(), current.clone()));
@@ -338,8 +338,8 @@ fn try_reduce_combination<'a>(first: &'a sqlite_parser_proto::Rhs, sequences: &'
 }
 
 struct ActionResolveConfig {
-    terminal_precedences: HashMap<usize, Precedence>,
-    rule_precedences: HashMap<usize, Precedence>
+    terminal_precedences: HashMap<u32, Precedence>,
+    rule_precedences: HashMap<u32, Precedence>
 }
 
 impl ActionResolveConfig {
@@ -361,7 +361,7 @@ impl ActionResolveConfig {
         Self { terminal_precedences, rule_precedences }
     }
 
-    fn find_precedence_by_id(id: usize, lookup: &HashMap<usize, Precedence>) -> Option<Precedence> {
+    fn find_precedence_by_id(id: u32, lookup: &HashMap<u32, Precedence>) -> Option<Precedence> {
         lookup.get(&id).cloned()
     }
 }

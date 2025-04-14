@@ -49,8 +49,8 @@ pub fn main() {
                 state_stack.push_back(*next_state);
                 TransitionEvent::Reduce { next_state: *next_state, current_state, pop_count: pop_count, syntax_kind: tag.clone() }
             }
-            (Some(LookaheadTransition::Accept { last_state }), None) if last_state == current_state => {
-                TransitionEvent::Accept { syntax_kind: syntax_kind::r#program, current_state }
+            (Some(LookaheadTransition::Accept { last_state, last_kind }), None) if last_state == current_state => {
+                TransitionEvent::Accept { syntax_kind: last_kind, current_state }
             }
             _ => {
                 panic!("Parse error at {:?}, state: {}", lookahead, current_state);
@@ -77,7 +77,7 @@ pub fn main() {
 
 fn fetch_transition(lookahead: Option<&(SyntaxKind, Option<&str>)>, current_state: usize, lookahead_transitions: &[HashMap<u32, LookaheadTransition>], (eof_state, _): (usize, usize)) -> Option<LookaheadTransition> {
     let Some((kind, _)) = lookahead else {
-        return Some(LookaheadTransition::Accept{ last_state: eof_state });
+        return Some(LookaheadTransition::Accept{ last_state: eof_state, last_kind: syntax_kind::r#program });
     };
 
     lookahead_transitions[current_state].get(&kind.id).cloned()

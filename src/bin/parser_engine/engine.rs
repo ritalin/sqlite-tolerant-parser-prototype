@@ -35,7 +35,7 @@ pub enum LookaheadTransition {
     Unknown,
     Shift { next_state: usize },
     Reduce{ pop_count: usize, lhs: u32 },
-    Accept{ last_state: usize },
+    Accept{ last_state: usize, last_kind: SyntaxKind },
 }
 
 impl Default for LookaheadTransition {
