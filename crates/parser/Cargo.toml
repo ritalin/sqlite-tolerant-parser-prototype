@@ -1,0 +1,17 @@
+[package]
+name = "parser"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "parsing_tree"
+path = "src/bin/parsing_tree/main.rs"
+
+[dependencies]
+sqlite-parser-proto = { path = "../..", features = ["parser_generated"] }
+cstree = { workspace = true }
+anyhow = { workspace = true }
+indexmap = "2.9.0"
+
+[features]
+parser_generated = []
