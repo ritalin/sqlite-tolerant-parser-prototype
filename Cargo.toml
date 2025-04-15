@@ -5,7 +5,8 @@ edition = "2024"
 
 [workspace]
 members = [
-    "crates/generate",
+    "crates/generate", 
+    "crates/parser",
 ]
 
 [[bin]]
@@ -43,11 +44,12 @@ phf = { version = "0.11.3", features = ["macros"] }
 serde_json = "1.0.140"
 quote = "1.0.40"
 proc-macro2 = "1.0.94"
+cstree = "0.12.2"
 
 [dependencies]
 anyhow = { workspace = true }
 cc = "1.2.17"
-cstree = "0.12.2"
+cstree = { workspace = true }
 lalry = { workspace = true }
 maplit = "1.0.2"
 phf = { workspace = true }
