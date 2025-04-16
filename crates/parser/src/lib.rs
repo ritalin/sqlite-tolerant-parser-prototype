@@ -1,4 +1,4 @@
-use cstree::interning::{InternKey, TokenKey};
+use cstree::{interning::{InternKey, TokenKey}, util::NodeOrToken};
 use sqlite_parser_proto::{engine, LookaheadTransition, SyntaxKind};
 
 mod parser;
