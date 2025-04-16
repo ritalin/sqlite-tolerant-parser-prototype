@@ -5,9 +5,7 @@ use quote::quote;
 
 use crate::{tokens_to_string, with_indent};
 
-pub fn export_parser_state(machine: &lalry::LR1ParseTable<'_, GrammarSymbol, String, RuleId>, start_symbol: &str, symbols: &[GrammarSymbol]) -> String {
-    let lookup = HashMap::<String, u32>::from_iter(symbols.iter().map(|x| (x.name.clone(), x.id)));
-
+pub fn export_parser_state(machine: &lalry::LR1ParseTable<'_, GrammarSymbol, String, RuleId>, start_symbol: &str, lookup: &HashMap<String, u32>) -> String {
     let lookahead_state = export_lookahead_parser_state(&machine.states, &lookup);
     let goto_state = export_goto_parser_state(&machine.states, &lookup);
     let eof_state = export_eof_parser_state(&machine.states, lookup.get(start_symbol));
@@ -134,9 +132,7 @@ fn create_map_comment(state: usize, depth: usize) -> String {
     with_indent(&format!("// state: #{state}"), depth)
 }
 
-pub fn export_parser_state_pretty(machine: &lalry::LR1ParseTable<'_, GrammarSymbol, String, RuleId>, start_symbol: &str, symbols: &[GrammarSymbol]) -> String {
-    let lookup = HashMap::<String, u32>::from_iter(symbols.iter().map(|x| (x.name.clone(), x.id)));
-
+pub fn export_parser_state_pretty(machine: &lalry::LR1ParseTable<'_, GrammarSymbol, String, RuleId>, start_symbol: &str, lookup: &HashMap<String, u32>) -> String {
     let iter = vec![
         "use phf::phf_map;".to_string(),
         "type LATransition = LookaheadTransition;".to_string(),

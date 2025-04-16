@@ -1,0 +1,90 @@
+{
+    "lexme": {
+        "CTIME_KW": ["CURRENT_DATE", "CURRENT_TIME", "CURRENT_TIMESTAMP"],
+        "COLUMNKW": ["COLUMN"],
+        "LIKE_KW": ["LIKE", "GLOB", "REGEXP"],
+        "JOIN_KW": ["CROSS", "FULL", "INNER", "LEFT", "NATURAL", "OUTER", "RIGHT"],
+        "TRUEFALSE": ["TRUE", "FALSE"],
+        "SEMI": [";"],
+        "LP": ["("],
+        "RP": [")"],
+        "NE": ["<>", "!="],
+        "EQ": ["="],
+        "GT": [">"],
+        "LE": ["<="],
+        "LT": ["<"],
+        "GE": [">="],
+        "BITAND": ["&"],
+        "BITOR": ["|"],
+        "LSHIFT": ["<<"],
+        "RSHIFT": [">>"],
+        "PLUS": ["+"], 
+        "MINUS": ["-"], 
+        "SLASH": ["/"],
+        "REM": ["%"],
+        "PTR": ["->"], 
+        "BITNOT": ["~"], 
+        "DOT": ["."],
+        "VARIABLE": ["?"],
+        "ASTERISK": ["*"],
+        "CONCAT": ["||"],
+        "COMMA": [","]
+    },
+    "regex": {
+        "QNUMBER": [{
+            "pattern": "(x|X)(\\d+(_\\d+)*)",
+            "main": true
+        }],
+        "STRING": [{
+            "pattern": "'.*?'",
+            "main": true
+        }],
+        "ID": [
+            {
+                "pattern": "\".*?\"",
+                "main": true
+            },
+            {
+                "pattern": "[a-zA-Z_][0-9a-zA-Z_]*",
+                "main": true
+            }
+        ],
+        "INDEXED": [
+            {
+                "pattern": "\".*?\"",
+                "main": true
+            },
+            {
+                "pattern": "[a-zA-Z_][0-9a-zA-Z_]*",
+                "main": true
+            }
+        ],
+        "BLOB": [{
+            "pattern": "(x|X)'.*?'",
+            "main": true
+        }],
+        "INTEGER": [{
+            "pattern": "(\\d+(_\\d+)*)",
+            "main": true
+        }],
+        "FLOAT": [{
+            "pattern": "((\\d+(_\\d+)*)?[.]\\d+(_\\d+)*(e[+-]?\\d+(_\\d+)*)?)|(\\d+(_\\d+)*[.](e[+-]?\\d+(_\\d+)*)?)",
+            "main": true
+        }],
+        "SPACE": [{
+            "pattern": "\\s+",
+            "leading": true,
+            "trailing": true
+        }],
+        "COMMENT": [
+            {
+                "pattern": "(?s)/\\*.*?\\*/",
+                "leading": true
+            },
+            {
+                "pattern": "--.*",
+                "leading": true
+            }
+        ]
+    }
+}

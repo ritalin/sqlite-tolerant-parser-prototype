@@ -1,14 +1,16 @@
-use std::collections::LinkedList;
+use std::collections::{BTreeMap, HashMap, LinkedList};
 
 mod config;
 mod convert;
 mod export_syntax_kind;
 mod export_state_transition;
+mod export_scan_rule;
 
 pub use config::ActionResolveConfig;
 pub use convert::LalryBuilder;
 pub use export_syntax_kind::{export_syntax_kind, export_syntax_kind_pretty};
 pub use export_state_transition::{export_parser_state, export_parser_state_pretty};
+pub use export_scan_rule::export_scan_rule_pretty;
 
 struct IdGenerator {
     stack: LinkedList<u32>,
@@ -39,6 +41,23 @@ impl IdGenerator {
             }
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+pub struct ScanRuleSet {
+    pub lexme: HashMap<String, Vec<String>>,
+    pub regex: BTreeMap<String, Vec<RegexScanRule>>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct RegexScanRule {
+    pub pattern: String,
+    #[serde(default)]
+    pub leading: bool,
+    #[serde(default)]
+    pub trailing: bool,
+    #[serde(default)]
+    pub main: bool,
 }
 
 pub fn tokens_to_string(tokens: proc_macro2::TokenStream, depth: usize) -> String {
