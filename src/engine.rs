@@ -47,6 +47,7 @@ mod scan_rules {
     pub static SUPPORT_LEADING: &[usize] = &[];
     pub static SUPPORT_TRAILING: &[usize] = &[];
     pub static SUPPORT_MAIN: &[usize] = &[];
+    pub static ALTERNATIVE_SYMBOL_TABLE: phf::Map<u32, &[u32]> = phf::phf_map!{};
 }
 
 impl cstree::Syntax for SyntaxKind {
@@ -168,4 +169,9 @@ pub fn scan_by_lexme_rule(source: &str) -> Option<crate::ScanPattern> {
         Some(pattern) => Some(pattern.clone()),
         None => None,
     }
+}
+
+pub fn alternative_symbols(id: u32) -> Option<Vec<u32>> {
+    scan_rules::ALTERNATIVE_SYMBOL_TABLE.get(&id)
+    .map(|values| Vec::<u32>::from(*values))
 }
