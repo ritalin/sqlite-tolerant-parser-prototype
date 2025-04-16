@@ -6,7 +6,7 @@ edition = "2024"
 [workspace]
 members = [
     "crates/generate", 
-    "crates/parser",
+    "crates/parser", "crates/scanner",
 ]
 
 [[bin]]
@@ -45,6 +45,7 @@ serde_json = "1.0.140"
 quote = "1.0.40"
 proc-macro2 = "1.0.94"
 cstree = "0.12.2"
+serde = { version = "1.0.219", features = ["derive"] }
 
 [dependencies]
 anyhow = { workspace = true }
@@ -56,7 +57,7 @@ phf = { workspace = true }
 proc-macro2 = { workspace = true }
 quote = { workspace = true }
 regex = "1.11.1"
-serde = { version = "1.0.219", features = ["derive"] }
+serde = { workspace = true }
 serde_json = { workspace = true }
 
 [build-dependencies]

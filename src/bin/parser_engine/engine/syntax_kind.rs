@@ -35,6 +35,8 @@ use super::SyntaxKind;
 #[allow(non_upper_case_globals)] pub static r#program: SyntaxKind = SyntaxKind { text: "program", id: 329, is_keyword: false, is_terminal: false };
 #[allow(non_upper_case_globals)] pub static r#error: SyntaxKind = SyntaxKind { text: "ERROR", id: 4294967295, is_keyword: false, is_terminal: false };
 
+#[allow(non_upper_case_globals)] pub static r#STRING: SyntaxKind = SyntaxKind { text: "STRING", id: 330, is_keyword: false, is_terminal: true };
+
 pub mod maps {
     use super::*;
     

@@ -134,6 +134,7 @@ dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
+ "serde",
  "serde_json",
  "sqlite-parser-proto",
  "syn",
@@ -409,6 +410,15 @@ name = "ryu"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
+
+[[package]]
+name = "scanner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cstree",
+ "sqlite-parser-proto",
+]
 
 [[package]]
 name = "scopeguard"

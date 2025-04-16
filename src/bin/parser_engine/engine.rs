@@ -2,6 +2,7 @@ use syntax_kind::maps::SYNTAX_KIND_MAP;
 
 pub mod syntax_kind;
 mod transition_state;
+mod scan_rule;
 
 pub use transition_state::{init_lookahead_translations, eof_transition, init_goto_transition_table};
 
@@ -50,3 +51,4 @@ pub enum TransitionEvent {
     Error { syntax_kind: SyntaxKind, failed_state: usize, pop_count: usize, candidate_syntax_kinds: Vec<SyntaxKind> },
     Accept{ current_state: usize, syntax_kind: SyntaxKind },
 }
+

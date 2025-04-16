@@ -148,3 +148,10 @@ pub enum TransitionEvent {
     Error { syntax_kind: SyntaxKind, failed_state: usize, pop_count: usize, candidate_syntax_kinds: Vec<SyntaxKind> },
     Accept{ current_state: usize, syntax_kind: SyntaxKind },
 }
+
+#[derive(Clone, Debug)]
+pub struct ScanPattern {
+    pub id: u32,
+    pub pattern: &'static str,
+    pub len: usize,
+}

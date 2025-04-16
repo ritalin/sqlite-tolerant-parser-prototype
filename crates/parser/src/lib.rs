@@ -1,4 +1,3 @@
-use anyhow::bail;
 use cstree::interning::{InternKey, TokenKey};
 use sqlite_parser_proto::{engine, LookaheadTransition, SyntaxKind};
 
