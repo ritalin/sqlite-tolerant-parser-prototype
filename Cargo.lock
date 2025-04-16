@@ -273,6 +273,7 @@ dependencies = [
  "anyhow",
  "cstree",
  "indexmap",
+ "scanner",
  "sqlite-parser-proto",
 ]
 

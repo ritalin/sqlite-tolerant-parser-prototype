@@ -25,16 +25,15 @@ pub fn main() -> Result<(), anyhow::Error> {
     loop {
         let current_state = *state_stack.back().unwrap();
         
-        let lookahead = tokens.front();
+        let lookahead = tokens.front().map(|(kind, token)| (kind.clone(),token.map(String::from) ));
 
-        let event = match (fetch_parser_next_state(lookahead, current_state)?, lookahead) {
-            (LookaheadTransition::Shift { next_state }, Some((kind, token))) => {
+        let event = match (fetch_parser_next_state(lookahead.as_ref(), current_state)?, lookahead.as_ref()) {
+            (LookaheadTransition::Shift { next_state }, Some((kind, _))) => {
                 let tag = kind.clone();
-                let tk = token.map(String::from);
 
                 let _ = tokens.pop_front();
                 state_stack.push_back(next_state);
-                TransitionEvent::Shift { syntax_kind: tag, next_state: next_state, current_state, input: tk }   
+                TransitionEvent::Shift { syntax_kind: tag, next_state: next_state, current_state }   
             }
             (LookaheadTransition::Reduce { pop_count, lhs }, Some((kind, _))) => {
                 for _ in 0..pop_count {
@@ -57,8 +56,8 @@ pub fn main() -> Result<(), anyhow::Error> {
         };
         
         match event {
-            TransitionEvent::Shift { syntax_kind, current_state, next_state, input } => {
-                println!("Shift/kind: {}, state: {} -> {}, input: {:?}", syntax_kind.text, current_state, next_state, input);
+            TransitionEvent::Shift { syntax_kind, current_state, next_state } => {
+                println!("Shift/kind: {}, state: {} -> {}, input: {:?}", syntax_kind.text, current_state, next_state, lookahead);
             }
             TransitionEvent::Reduce { syntax_kind, current_state, next_state, pop_count } => {
                 println!("Reduce/kind: {}, state: {} -> {}, pop: {}", syntax_kind.text, current_state, next_state, pop_count);
@@ -76,7 +75,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-fn fetch_parser_next_state(lookahead: Option<&(SyntaxKind, Option<&str>)>, current_state: usize) -> Result<LookaheadTransition, anyhow::Error> {
+fn fetch_parser_next_state(lookahead: Option<&(SyntaxKind, Option<String>)>, current_state: usize) -> Result<LookaheadTransition, anyhow::Error> {
     match lookahead {
         Some(_) => {
             resolve_parser_next_state(current_state, &lookahead.unwrap().0)

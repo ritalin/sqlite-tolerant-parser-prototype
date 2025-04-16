@@ -9,6 +9,7 @@ path = "src/bin/parsing_tree/main.rs"
 
 [dependencies]
 sqlite-parser-proto = { path = "../..", features = ["parser_generated"] }
+scanner = { path = "../scanner" }
 cstree = { workspace = true }
 anyhow = { workspace = true }
 indexmap = "2.9.0"

@@ -13,7 +13,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let mut scanner = scanner::Scanner::create(source)?;
 
-    while let Some(token) = scanner.lookahead()? {
+    while let Some(token) = scanner.lookahead() {
         println!("leading : {:?}", token.leading);
         println!("main    : {:?}", token.main);
         println!("trailing: {:?}", token.trailing);

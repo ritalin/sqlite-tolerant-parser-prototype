@@ -1,15 +1,18 @@
 use cstree::interning::{InternKey, TokenKey};
 use sqlite_parser_proto::{engine, LookaheadTransition, SyntaxKind};
 
+mod parser;
+pub use parser::Parser;
+
 pub type SyntaxNode = cstree::syntax::ResolvedNode<SyntaxKind>;
 
 #[derive(Clone, Default)]
 pub struct Language;
 
 impl Language {
-    pub fn resolve_lookahead_state(&self, lookahead: Option<&(SyntaxKind, Option<String>)>, current_state: usize) -> Result<LookaheadTransition, anyhow::Error> {
+    pub fn resolve_lookahead_state(&self, lookahead: Option<&SyntaxKind>, current_state: usize) -> Result<LookaheadTransition, anyhow::Error> {
         match lookahead {
-            Some((kind, _)) => {
+            Some(kind) => {
                 engine::resolve_parser_next_state(current_state, kind)
             }
             None => {
@@ -56,6 +59,11 @@ impl SyntaxTree {
     }
 }
 
+pub enum Annotation {
+    State,
+    Recovery,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum InternerError {
     KeySpaceExhausted,
@@ -70,7 +78,6 @@ impl std::fmt::Display for InternerError {
 }
 
 impl std::error::Error for InternerError {}
-
 
 #[derive(Clone)]
 pub struct InternCache {

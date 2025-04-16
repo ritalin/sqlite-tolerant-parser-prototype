@@ -143,7 +143,7 @@ impl Default for LookaheadTransition {
 }
 
 pub enum TransitionEvent {
-    Shift { syntax_kind: SyntaxKind, current_state: usize, next_state: usize, input: Option<String> },
+    Shift { syntax_kind: SyntaxKind, current_state: usize, next_state: usize },
     Reduce{ syntax_kind: SyntaxKind, current_state: usize, next_state: usize, pop_count: usize },
     Error { syntax_kind: SyntaxKind, failed_state: usize, pop_count: usize, candidate_syntax_kinds: Vec<SyntaxKind> },
     Accept{ current_state: usize, syntax_kind: SyntaxKind },
