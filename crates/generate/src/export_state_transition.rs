@@ -26,8 +26,9 @@ fn export_lookahead_parser_state(states: &[lalry::LR1State<'_, GrammarSymbol, St
         .map(|state| {
             let rules: TokenStream = state.lookahead.iter()
                 .filter_map(|(la, action)| {
-                    export_lookahead_state_transition_member(la.id, action, &lookup)
+                    export_lookahead_state_transition_member(la, action, &lookup)
                 })
+                .map(|(token, _)| token)
                 .collect()
             ;
 
@@ -97,7 +98,9 @@ fn export_eof_parser_state(states: &[lalry::LR1State<'_, GrammarSymbol, String, 
     }
 }
 
-fn export_lookahead_state_transition_member(la_id: u32, action: &lalry::LRAction<'_, GrammarSymbol, String, RuleId>, lookup: &HashMap<String, u32>) -> Option<TokenStream> {
+fn export_lookahead_state_transition_member(la: &GrammarSymbol, action: &lalry::LRAction<'_, GrammarSymbol, String, RuleId>, lookup: &HashMap<String, u32>) -> Option<(TokenStream, String)> {
+    let la_id = la.id;
+
     match action {
         lalry::LRAction::Reduce(lhs, rhs) => {
             let pop_count = rhs.syms.len();
@@ -106,13 +109,13 @@ fn export_lookahead_state_transition_member(la_id: u32, action: &lalry::LRAction
             let rule = quote! {
                 #la_id => LATransition::Reduce { pop_count: #pop_count, lhs: #lhs_id },
             };
-            Some(rule)
+            Some((rule, la.name.to_string()))
         }
         lalry::LRAction::Shift(next_state) => {
             let rule = quote! {
                 #la_id => LATransition::Shift { next_state: #next_state },
             };
-            Some(rule)
+            Some((rule, la.name.to_string()))
         }
         lalry::LRAction::Accept => {
             None
@@ -148,8 +151,8 @@ fn export_parser_lookahead_state_pretty(states: &[lalry::LR1State<'_, GrammarSym
     let lookahead_states = states.iter().enumerate()
         .flat_map(|(i, state)| {
             let members = state.lookahead.iter()
-                .filter_map(|(la, action)| export_lookahead_state_transition_member(la.id, action, &lookup))
-                .map(|tokens| tokens_to_string(tokens, 2))
+                .filter_map(|(la, action)| (export_lookahead_state_transition_member(la, action, &lookup)))
+                .map(|(tokens, la_name)| format!("{} // LA: {}", tokens_to_string(tokens, 2), la_name))
             ;
 
             let iter = std::iter::empty();

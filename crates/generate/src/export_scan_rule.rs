@@ -12,6 +12,7 @@ pub fn export_scan_rule_pretty(rule_set: &ScanRuleSet, symbols: &[GrammarSymbol]
         ])
         .chain(exprt_lexme_scan_rule_pretty(&rule_set.lexme, collect_keywords(symbols), lookup))
         .chain(export_regex_scan_rule_pretty(&rule_set.regex, lookup))
+        .chain(export_alternative_token_pretty(&rule_set.alternatives, lookup))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -135,6 +136,33 @@ fn export_regex_scan_rule_pretty(regex: &BTreeMap<String, Vec<crate::RegexScanRu
     ])
 }
 
-fn export_rule_support_pretty(i: usize, pattern: &str) -> String {
+fn export_alternative_token_pretty(alternatives: &HashMap<String, Vec<String>>, lookup: &HashMap<String, u32>) -> impl Iterator<Item = String> {
+    let rules = alternatives.iter()
+        .flat_map(|(symbol, values)| export_alternative_pattern_pretty(symbol, values, lookup))
+    ;
+
+    std::iter::empty()
+    .chain(vec!["pub static ALTERNATIVE_SYMBOL_TABLE: phf::Map<u32, &[u32]> = phf_map!{".to_string()])
+    .chain(rules)
+    .chain(vec!["};".to_string()])
+}
+
+fn export_alternative_pattern_pretty(symbol: &str, alternatives: &[String], lookup: &HashMap<String, u32>) -> impl Iterator<Item = String> {
+    let key = lookup.get(symbol).expect(&format!("Not found alternative key (`{symbol}`)"));
+
+    let values = alternatives.iter()
+        .map(|alt| {
+            let id = lookup.get(alt).expect(&format!("Not found alternative value (`{alt}`)"));
+            with_indent(&export_rule_support_pretty(*id, &alt), 2)
+        })
+    ;
+
+    std::iter::empty()
+    .chain(vec![with_indent(&format!("{key}u32 => &["), 1)])
+    .chain(values)
+    .chain(vec![with_indent("],", 1)])
+}
+
+fn export_rule_support_pretty<V: std::fmt::Display>(i: V, pattern: &str) -> String {
     format!("{i}, // {pattern}")
 }

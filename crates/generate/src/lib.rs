@@ -47,6 +47,7 @@ impl IdGenerator {
 pub struct ScanRuleSet {
     pub lexme: HashMap<String, Vec<String>>,
     pub regex: BTreeMap<String, Vec<RegexScanRule>>,
+    pub alternatives: HashMap<String, Vec<String>>,
 }
 
 #[derive(serde::Deserialize)]
