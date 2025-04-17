@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, LinkedList};
+use std::collections::{HashMap, LinkedList};
 use anyhow::bail;
 use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, util::NodeOrToken};
 use scanner::{Scanner, Token};
@@ -12,6 +12,21 @@ pub struct Parser {
 
 type NodeElement = NodeOrToken::<GreenNode, GreenToken>;
 
+#[derive(Clone, PartialEq, Eq, Hash)]
+enum AnnotationKey {
+    Node(GreenNode),
+    Token(GreenToken),
+}
+
+impl From<&NodeElement> for AnnotationKey {
+    fn from(value: &NodeElement) -> Self {
+        match value {
+            NodeOrToken::Node(node) => Self::Node(node.clone()),
+            NodeOrToken::Token(node) => Self::Token(node.clone()),
+        }
+    }
+}
+
 impl Parser {
     pub fn new() -> Self {
         Self {
@@ -24,7 +39,7 @@ impl Parser {
         let mut element_stack = LinkedList::new();
         let mut intern_cache = InternCache::new();
         let mut cache = NodeCache::with_interner(&mut intern_cache);
-        let mut node_annotations = HashMap::<GreenNode, (Annotation, AnnotationStatus)>::new();
+        let mut node_annotations = HashMap::<AnnotationKey, (Annotation, AnnotationStatus)>::new();
 
         let mut scanner = Scanner::create(source)?;
 
@@ -102,6 +117,7 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
             TransitionEvent::Accept { syntax_kind: last_kind, current_state }
         }
         _=> {
+
             bail!("Unexpected error (current_state: {current_state})");
         }
     };
@@ -109,7 +125,7 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
     Ok(event)
 }
 
-fn create_green_token(token: Token, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<GreenNode, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
+fn create_green_token(token: Token, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<AnnotationKey, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
     let leading = 
         token.leading.map(|items| {
             items.iter().filter_map(|item| create_green_token_internal(item.tag, item.value.as_ref(), current_state, next_state, cache).transpose())
@@ -144,21 +160,14 @@ fn create_green_token(token: Token, current_state: usize, next_state: usize, cac
     use cstree::Syntax;
     let node = GreenNode::new(token.main.tag.into_raw(), children);
 
-    let (annotation, status) = match alternative_symbols(token.main.tag.id) {
-        Some(_) => {
-            (
-                Annotation::State,
-                AnnotationStatus::Unresolved,
-            )
-        }
-        None => {
-            (
-                Annotation::State,
-                AnnotationStatus::Resolved,
-            )
-        }
+    let annotation = Annotation::State;
+    let status = AnnotationStatus{ 
+        range_from: token.main.offset, 
+        len: token.main.len, 
+        resolved: alternative_symbols(token.main.tag.id).is_none() 
     };
-    annotations.insert(node.clone(), (annotation, status));
+
+    annotations.insert(AnnotationKey::Node(node.clone()), (annotation, status));
 
     Ok(Some(NodeElement::Node(node)))
 }
@@ -189,12 +198,12 @@ fn create_green_token_internal(kind: SyntaxKind, input: Option<&String>, current
     Ok(node)
 }
 
-fn create_green_node(kind: SyntaxKind, pop_count: usize, stack: &mut LinkedList<Option<NodeElement>>, annotations: &mut HashMap<GreenNode, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
+fn create_green_node(kind: SyntaxKind, pop_count: usize, stack: &mut LinkedList<Option<NodeElement>>, annotations: &mut HashMap<AnnotationKey, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
     use cstree::Syntax;
     let children = stack.split_off(stack.len() - pop_count)
         .into_iter()
         .filter_map(std::convert::identity)
-        .map(Into::into)
+        .map(Into::<NodeElement>::into)
         .collect::<Vec<_>>()
     ;
 
@@ -202,51 +211,61 @@ fn create_green_node(kind: SyntaxKind, pop_count: usize, stack: &mut LinkedList<
         return Ok(None);
     }
 
+    let (offset, len) = children.iter()
+        .filter_map(|node| annotations.get(&AnnotationKey::from(node)))
+        .fold((0, 0), |(offset, len), (_, status)| {
+            (usize::min(status.range_from, offset), status.len + len)
+        })
+    ;
+
     let node = cstree::green::GreenNode::new(kind.into_raw(), children);
 
     let annotation = Annotation::State;
-    let staus = AnnotationStatus::Resolved;
+    let staus = AnnotationStatus{ range_from: offset, len: len, resolved: true };
 
-    annotations.insert(node.clone(), (annotation, staus));
+    annotations.insert(AnnotationKey::Node(node.clone()), (annotation, staus));
 
     Ok(Some(NodeElement::Node(node)))
 }
 
-fn resolve_anotation_status(parent_node: &GreenNode, annotations: &HashMap<GreenNode, (Annotation, AnnotationStatus)>, resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>) -> GreenNode {
+fn resolve_anotation_status(parent_node: &GreenNode, annotations: &HashMap<AnnotationKey, (Annotation, AnnotationStatus)>, resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>) -> GreenNode {
     use cstree::Syntax;
-    let unresolved_nodes = annotations.iter()
-        .filter_map(|(k, (_, status))| match status {
-            AnnotationStatus::Resolved => None,
-            AnnotationStatus::Unresolved => Some(k.clone()),
-        })
-        .collect::<HashSet<_>>()
+    let status_map = annotations.iter()
+        .map(|(k, (_, status))| (k.clone(), status))
+        .collect::<HashMap<_, _>>()
     ;
 
     let kind = SyntaxKind::from_raw(parent_node.kind());
-    resolve_anotation_status_children(parent_node, &kind, &kind, &unresolved_nodes, resolve_rules)
+    resolve_anotation_status_children(parent_node, &kind, &kind, &status_map, resolve_rules)
 }
 
 fn resolve_anotation_status_children(
     parent_node: &GreenNode, lhs: &SyntaxKind, rhs: &SyntaxKind,
-    unresolved_nodes: &HashSet<GreenNode>, 
+    status_map: &HashMap<AnnotationKey, &AnnotationStatus>, 
     resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>) -> GreenNode
 {
     use cstree::Syntax;
-    let children = parent_node.children()
+    let mut children = parent_node.children()
         .map(|child| {
             match child {
                 NodeOrToken::Node(node) => {
-                    let new_child = resolve_anotation_status_children(node, rhs, &SyntaxKind::from_raw(node.kind()), unresolved_nodes, resolve_rules);
+                    let new_child = resolve_anotation_status_children(node, rhs, &SyntaxKind::from_raw(node.kind()), status_map, resolve_rules);
                     NodeElement::Node(new_child)
                 }
                 NodeOrToken::Token(node) => NodeElement::Token(node.clone()),
             }
         })
+        .collect::<Vec<_>>()
     ;
 
-    if unresolved_nodes.contains(parent_node) {
-        if let Some(k) = resolve_rules.get(&(*lhs, *rhs)) {
-            return GreenNode::new(cstree::RawSyntaxKind(k.id), children);
+    // rearrange children
+    sort_children(&mut children, status_map);
+
+    if let Some(status) = status_map.get(&AnnotationKey::Node(parent_node.clone())) {
+        if !status.resolved {
+            if let Some(k) = resolve_rules.get(&(*lhs, *rhs)) {
+                return GreenNode::new(cstree::RawSyntaxKind(k.id), children);
+            }
         }
     }
 
@@ -256,17 +275,45 @@ fn resolve_anotation_status_children(
 fn create_error_node() -> Result<NodeElement, anyhow::Error> {
     use cstree::Syntax;
 
-    #[cfg(not(feature = "parser_generated"))]
-    let kind = SyntaxKind { id: u32::MAX, text: "ILLEGAL", is_keyword: false, is_terminal: false };
-    #[cfg(feature = "parser_generated")]
     let kind = syntax_kind::r#ILLEGAL;
-
     let node = cstree::green::GreenNode::new(kind.into_raw(), vec![]);
 
     Ok(NodeElement::Node(node))
 }
 
-enum AnnotationStatus {
-    Resolved,
-    Unresolved,
+fn sort_children(children: &mut Vec<NodeElement>, status_map: &HashMap<AnnotationKey, &AnnotationStatus>) {
+    children.sort_by(|lhs, rhs| {
+        let l_status = status_map.get(&AnnotationKey::from(lhs));
+        let r_status = status_map.get(&AnnotationKey::from(rhs));
+
+        match (l_status, r_status) {
+            (Some(lhs), Some(rhs)) => lhs.cmp(rhs),
+            (None, Some(_)) => std::cmp::Ordering::Less,
+            (Some(_), None) => std::cmp::Ordering::Greater,
+            (None, None) => std::cmp::Ordering::Equal,
+        }
+    });
+}
+
+#[derive(Eq, Ord)]
+struct AnnotationStatus {
+    range_from: usize,
+    len: usize,
+    resolved: bool,
+}
+
+impl PartialEq for AnnotationStatus {
+    fn eq(&self, other: &Self) -> bool {
+        self.range_from == other.range_from && self.len == other.len
+    }
+}
+
+impl PartialOrd for AnnotationStatus {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match self.range_from.partial_cmp(&other.range_from) {
+            Some(core::cmp::Ordering::Equal) => {}
+            ord => return ord,
+        }
+        self.len.partial_cmp(&other.len)
+    }
 }
