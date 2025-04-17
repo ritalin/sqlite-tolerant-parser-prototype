@@ -1,9 +1,9 @@
 use std::collections::{HashMap, LinkedList};
 use anyhow::bail;
 use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, util::NodeOrToken};
-use scanner::{Scanner, Token};
+use scanner::{Scanner, Token, TokenItem};
 use sqlite_parser_proto::{engine::{alternative_symbols, kinds as syntax_kind}, LookaheadTransition, SyntaxKind, TransitionEvent};
-use crate::{InternCache, Language, SyntaxTree, Annotation};
+use crate::{Annotation, InternCache, Language, NodeType, SyntaxTree};
 
 
 pub struct Parser {
@@ -186,20 +186,20 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
 fn create_green_token(token: Token, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<AnnotationKey, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
     let leading = 
         token.leading.map(|items| {
-            items.iter().filter_map(|item| create_green_token_internal(item.tag, item.value.as_ref(), current_state, next_state, cache).transpose())
+            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::LeadingToken, current_state, next_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
     ;
 
-    let main = match create_green_token_internal(token.main.tag, token.main.value.as_ref(), current_state, next_state, cache)? {
+    let main = match create_green_token_internal(&token.main, NodeType::MainToken, current_state, next_state, annotations, cache)? {
         Some(main) => Some(vec![main]),
         None => None,
     };
 
     let trailing = 
         token.trailing.map(|items| {
-            items.iter().filter_map(|item| create_green_token_internal(item.tag, item.value.as_ref(), current_state, next_state, cache).transpose())
+            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::TrailingToken, current_state, next_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
@@ -218,7 +218,7 @@ fn create_green_token(token: Token, current_state: usize, next_state: usize, cac
     use cstree::Syntax;
     let node = GreenNode::new(token.main.tag.into_raw(), children);
 
-    let annotation = Annotation::State;
+    let annotation = Annotation::State { node_type: crate::NodeType::TokenSet };
     let status = AnnotationStatus{ 
         range_from: token.main.offset, 
         len: token.main.len, 
@@ -230,20 +230,20 @@ fn create_green_token(token: Token, current_state: usize, next_state: usize, cac
     Ok(Some(NodeElement::Node(node)))
 }
 
-fn create_green_token_internal(kind: SyntaxKind, input: Option<&String>, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>) -> Result<Option<NodeElement>, anyhow::Error> {
+fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_state: usize, next_state: usize, annotations: &mut HashMap<AnnotationKey, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>) -> Result<Option<NodeElement>, anyhow::Error> {
     let mut builder = cstree::build::GreenNodeBuilder::<SyntaxKind, InternCache>::with_cache(cache);
-    builder.start_node(kind);
+    builder.start_node(token.tag);
 
-    match (kind.is_keyword, kind.is_terminal) {
+    match (token.tag.is_keyword, token.tag.is_terminal) {
         (true, true) => {
-            builder.static_token(kind);
+            builder.static_token(token.tag);
         }
         (false, true) => {
-            let s = input.map(String::clone).unwrap_or(kind.text.to_string());
-            builder.token(kind, &s);
+            let s = token.value.clone().unwrap_or(token.tag.text.to_string());
+            builder.token(token.tag, &s);
         }
         _ => {
-            bail!("Unexpected shift state (kind: {:?}, input: {:?}, state: {} -> {})", kind, input, current_state, next_state);
+            bail!("Unexpected shift state (kind: {:?}, input: {:?}, state: {} -> {})", token.tag, token.value, current_state, next_state);
         }
     }
 
@@ -252,7 +252,20 @@ fn create_green_token_internal(kind: SyntaxKind, input: Option<&String>, current
         .and_then(|x| x.into_token())
         .map(|x| cstree::util::NodeOrToken::<GreenNode, GreenToken>::Token(x.clone()))
     ;
-    
+
+    match node.as_ref() {
+        Some(NodeElement::Token(node)) => {
+            let annotation = Annotation::State { node_type };
+            let status = AnnotationStatus{ 
+                range_from: token.offset, 
+                len: token.len, 
+                resolved: alternative_symbols(token.tag.id).is_none() 
+            };
+            annotations.insert(AnnotationKey::Token(node.clone()), (annotation, status));        
+        }
+        _ => {}
+    }
+
     Ok(node)
 }
 
@@ -278,7 +291,7 @@ fn create_green_node(kind: SyntaxKind, pop_count: usize, stack: &mut LinkedList<
 
     let node = cstree::green::GreenNode::new(kind.into_raw(), children);
 
-    let annotation = Annotation::State;
+    let annotation = Annotation::State { node_type: crate::NodeType::Node };
     let staus = AnnotationStatus{ range_from: offset, len: len, resolved: true };
 
     annotations.insert(AnnotationKey::Node(node.clone()), (annotation, staus));
@@ -298,7 +311,7 @@ fn resolve_anotation_status(parent_node: &GreenNode, annotations: &HashMap<Annot
 }
 
 fn resolve_anotation_status_children(
-    parent_node: &GreenNode, lhs: &SyntaxKind, rhs: &SyntaxKind,
+    parent_node: &GreenNode, parent_kind: &SyntaxKind, kind: &SyntaxKind,
     status_map: &HashMap<AnnotationKey, &AnnotationStatus>, 
     resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>) -> GreenNode
 {
@@ -307,7 +320,7 @@ fn resolve_anotation_status_children(
         .map(|child| {
             match child {
                 NodeOrToken::Node(node) => {
-                    let new_child = resolve_anotation_status_children(node, rhs, &SyntaxKind::from_raw(node.kind()), status_map, resolve_rules);
+                    let new_child = resolve_anotation_status_children(node, kind, &SyntaxKind::from_raw(node.kind()), status_map, resolve_rules);
                     NodeElement::Node(new_child)
                 }
                 NodeOrToken::Token(node) => NodeElement::Token(node.clone()),
@@ -321,13 +334,13 @@ fn resolve_anotation_status_children(
 
     if let Some(status) = status_map.get(&AnnotationKey::Node(parent_node.clone())) {
         if !status.resolved {
-            if let Some(k) = resolve_rules.get(&(*lhs, *rhs)) {
+            if let Some(k) = resolve_rules.get(&(*parent_kind, *kind)) {
                 return GreenNode::new(cstree::RawSyntaxKind(k.id), children);
             }
         }
     }
 
-    GreenNode::new(cstree::RawSyntaxKind(lhs.id), children)
+    GreenNode::new(cstree::RawSyntaxKind(kind.id), children)
 }
 
 fn create_error_node() -> Result<NodeElement, anyhow::Error> {

@@ -59,8 +59,16 @@ impl SyntaxTree {
     }
 }
 
+pub enum NodeType {
+    TokenSet,
+    LeadingToken,
+    TrailingToken,
+    MainToken,
+    Node,
+}
+
 pub enum Annotation {
-    State,
+    State { node_type: NodeType },
     Recovery,
 }
 
