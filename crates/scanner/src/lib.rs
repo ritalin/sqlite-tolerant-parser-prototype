@@ -4,7 +4,7 @@ pub use scanner::Scanner;
 
 use sqlite_parser_proto::SyntaxKind;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub leading: Option<Vec<TokenItem>>,
     pub main: TokenItem,

@@ -47,44 +47,40 @@ impl Parser {
             ((syntax_kind::r#selcollist, syntax_kind::r#STAR), syntax_kind::r#ASTERISK)
         ]);
 
-        loop {        
-            let current_state = *state_stack.back().unwrap();
-            let lookahead = scanner.lookahead().map(|token| token.main.tag);
-    
-            let element = match parse_state(lookahead.as_ref(), current_state, &mut state_stack, &self.language)? {
-                TransitionEvent::Shift { current_state, next_state, .. } => {
-                    match scanner.shift() {
-                        Some(token) => {
-                            create_green_token(token, current_state, next_state, &mut cache, &mut node_annotations)?
-                        }
-                        None => None
-                    }
-                }
-                TransitionEvent::Reduce { syntax_kind: kind, current_state: _current_state, next_state: _next_state, pop_count } => {
-                    create_green_node(kind, pop_count, &mut element_stack, &mut node_annotations)?
-                }
-                TransitionEvent::Accept { current_state: _current_state, syntax_kind: kind } if ! element_stack.is_empty() => {
-                    let root = create_green_node(kind, element_stack.len(), &mut element_stack, &mut node_annotations)?
-                        .and_then(NodeElement::into_node)
-                        .unwrap()
-                    ;
+        let root_kind = syntax_kind::r#program;
+        let root_member_kind = syntax_kind::r#ecmd;
+        let mut root_members = vec![];
 
-                    let root = resolve_anotation_status(&root, &node_annotations, &resolve_rules);
+        while let Some(lookahead) = scanner.lookahead() {
+            if (lookahead.main.tag == syntax_kind::r#EOF) && state_stack.is_empty() {
+                let token = create_green_token(lookahead.clone(), usize::MAX, usize::MAX, &mut cache, &mut node_annotations)?;
+                element_stack.push_back(token);
+                let root_member = create_green_node(root_member_kind, element_stack.len(), &mut element_stack, &mut node_annotations)?;
+                root_members.push(root_member);
+                break;
+            }
 
-                    return Ok(SyntaxTree::new(root, self.language.clone(), intern_cache));
+            match parse_internal(&mut scanner, &mut state_stack, &mut element_stack, &mut node_annotations, &mut cache, &resolve_rules, &self.language)? {
+                NodeGenerated::Node(element) => {
+                    element_stack.push_back(element);
                 }
-                TransitionEvent::Accept { current_state: _current_state, syntax_kind: _syntax_kind } => {
-                    let root = create_error_node()?.into_node().unwrap();
+                NodeGenerated::Root(element) => {
+                    return Ok(SyntaxTree::new(element, self.language.clone(), intern_cache.clone()));
+                }
+                NodeGenerated::RootMember(element) => {
+                    root_members.push(element);
 
-                    return Ok(SyntaxTree::new(root, self.language.clone(), intern_cache));
+                    state_stack.clear();
+                    element_stack.clear();
                 }
-                TransitionEvent::Error { syntax_kind, failed_state, pop_count, candidate_syntax_kinds } => {
-                    todo!()
-                }
-            };
+                NodeGenerated::Error(element) => {
 
-            element_stack.push_back(element);
+                }
+            }
         }
+
+        let tree = create_syntax_tree(root_kind, root_members.into_iter().filter_map(std::convert::identity).collect(), intern_cache, &node_annotations, &resolve_rules, &self.language);
+        Ok(tree)
     }
 
     pub fn language(&self) -> &Language {
@@ -92,15 +88,78 @@ impl Parser {
     }
 }
 
+enum NodeGenerated {
+    Node(Option<NodeElement>),
+    Root(GreenNode),
+    RootMember(Option<NodeElement>),
+    Error(Option<NodeElement>),
+}
+
+fn parse_internal(
+    scanner: &mut Scanner, 
+    state_stack: &mut LinkedList<usize>, 
+    element_stack: &mut LinkedList<Option<NodeElement>>,
+    node_annotations: &mut HashMap<AnnotationKey, (Annotation, AnnotationStatus)>, 
+    cache: &mut NodeCache<InternCache>,
+    resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>, 
+    language: &Language) -> Result<NodeGenerated, anyhow::Error> 
+{
+    let root_member_kind = syntax_kind::r#ecmd;
+    let terminte_kind = syntax_kind::r#SEMI;
+    
+    let current_state = *state_stack.back().unwrap();
+    let lookahead = scanner.lookahead().map(|token| token.main.tag);
+
+    match parse_state(lookahead.as_ref(), current_state, state_stack, language)? {
+        TransitionEvent::Shift { current_state, next_state, .. } => {
+            match scanner.shift() {
+                Some(token) if token.main.tag == terminte_kind => {
+                    let token = create_green_token(token, current_state, next_state, cache, node_annotations)?;
+                     element_stack.push_back(token);
+                    let root_member = create_green_node(root_member_kind, element_stack.len(), element_stack, node_annotations)?;
+                    Ok(NodeGenerated::RootMember(root_member))
+                }
+                Some(token) => {
+                    let node = create_green_token(token, current_state, next_state, cache, node_annotations)?;
+                    Ok(NodeGenerated::Node(node))
+                }
+                None => Ok(NodeGenerated::Node(None))
+            }
+        }
+        TransitionEvent::Reduce { syntax_kind: kind, current_state: _current_state, next_state: _next_state, pop_count } => {
+            let node = create_green_node(kind, pop_count, element_stack, node_annotations)?;
+            Ok(NodeGenerated::Node(node))
+        }
+        TransitionEvent::Accept { current_state: _current_state, syntax_kind: kind } if ! element_stack.is_empty() => {
+            let root = create_green_node(kind, element_stack.len(), element_stack, node_annotations)?
+                .and_then(NodeElement::into_node)
+                .unwrap()
+            ;
+
+            let root = resolve_anotation_status(&root, &node_annotations, &resolve_rules);
+
+            Ok(NodeGenerated::Root(root))
+        }
+        TransitionEvent::Accept { current_state: _current_state, syntax_kind: _syntax_kind } => {
+            let root = create_error_node()?.into_node().unwrap();
+
+            Ok(NodeGenerated::Root(root))
+        }
+        TransitionEvent::Error { syntax_kind, failed_state } => {
+            todo!()
+        }
+    }
+}
+
 fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack: &mut LinkedList<usize>, language: &Language) -> Result<TransitionEvent, anyhow::Error> {
-    let event = match (language.resolve_lookahead_state(lookahead, current_state)?, lookahead) {
-        (LookaheadTransition::Shift { next_state }, Some(lookahead)) => {
+    let event = match (language.resolve_lookahead_state(lookahead, current_state), lookahead) {
+        (Ok(LookaheadTransition::Shift { next_state }), Some(lookahead)) => {
             let tag = lookahead.clone();
 
             state_stack.push_back(next_state);
-            TransitionEvent::Shift { syntax_kind: tag, next_state: next_state, current_state }   
+            TransitionEvent::Shift { syntax_kind: tag, next_state, current_state }  
         }
-        (LookaheadTransition::Reduce { pop_count, lhs }, _) => {
+        (Ok(LookaheadTransition::Reduce { pop_count, lhs }), _) => {
             use cstree::Syntax;
             for _ in 0..pop_count {
                 state_stack.pop_back();
@@ -111,14 +170,13 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
             let kind = SyntaxKind::from_raw(cstree::RawSyntaxKind(lhs));
             
             state_stack.push_back(next_state);
-            TransitionEvent::Reduce { next_state: next_state, current_state, pop_count: pop_count, syntax_kind: kind }
+            TransitionEvent::Reduce { next_state: next_state, current_state, pop_count, syntax_kind: kind }
         }
-        (LookaheadTransition::Accept { last_kind, .. }, _) => {
+        (Ok(LookaheadTransition::Accept { last_kind, .. }), _) => {
             TransitionEvent::Accept { syntax_kind: last_kind, current_state }
         }
         _=> {
-
-            bail!("Unexpected error (current_state: {current_state})");
+            TransitionEvent::Error { syntax_kind: lookahead.cloned(), failed_state: current_state }
         }
     };
 
@@ -279,6 +337,12 @@ fn create_error_node() -> Result<NodeElement, anyhow::Error> {
     let node = cstree::green::GreenNode::new(kind.into_raw(), vec![]);
 
     Ok(NodeElement::Node(node))
+}
+
+fn create_syntax_tree(kind: SyntaxKind, children: Vec<NodeElement>, intern_cache: InternCache, node_annotations: &HashMap<AnnotationKey, (Annotation, AnnotationStatus)>, resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>, language: &Language) -> SyntaxTree {
+    let root = GreenNode::new(cstree::RawSyntaxKind(kind.id), children);
+    let root = resolve_anotation_status(&root, &node_annotations, &resolve_rules);
+    SyntaxTree::new(root, language.clone(), intern_cache.clone())
 }
 
 fn sort_children(children: &mut Vec<NodeElement>, status_map: &HashMap<AnnotationKey, &AnnotationStatus>) {
