@@ -1,10 +1,14 @@
-use cstree::{interning::{InternKey, TokenKey}, util::NodeOrToken};
+use std::collections::HashMap;
+
+use cstree::{green::{GreenNode, GreenToken}, interning::{InternKey, TokenKey}, syntax::ResolvedElementRef, util::NodeOrToken};
 use sqlite_parser_proto::{engine, LookaheadTransition, SyntaxKind};
 
 mod parser;
-pub use parser::Parser;
+pub use parser::{Parser, AnnotationKey, NodeId};
 
 pub type SyntaxNode = cstree::syntax::ResolvedNode<SyntaxKind>;
+
+type NodeElement = NodeOrToken::<GreenNode, GreenToken>;
 
 #[derive(Clone, Default)]
 pub struct Language;
@@ -31,14 +35,16 @@ pub struct SyntaxTree {
     root: SyntaxNode,
     language: Language,
     intern_cache: InternCache,
+    pub annotations: HashMap<AnnotationKey, (parser::NodeId, Annotation)>,
 }
 
 impl SyntaxTree {
-    pub fn new(root: cstree::green::GreenNode, language: Language, intern_cache: InternCache) -> Self {
+    pub fn new(root: SyntaxNode, language: Language, intern_cache: InternCache, annotations: HashMap<AnnotationKey, (parser::NodeId, Annotation)>) -> Self {
         Self {
-            root: SyntaxNode::new_root_with_resolver(root, intern_cache.clone()),
+            root,
             language,
             intern_cache,
+            annotations,
         }
     }
 
@@ -57,19 +63,32 @@ impl SyntaxTree {
     pub fn display(&self) -> String {
         self.root.display(&self.intern_cache)
     }
+
+    pub fn get_annotation_of(&self, node: ResolvedElementRef<SyntaxKind>) -> Option<Annotation> {
+        todo!()
+    }
 }
 
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum NodeType {
     TokenSet,
     LeadingToken,
     TrailingToken,
     MainToken,
     Node,
+    Error,
 }
 
-pub enum Annotation {
-    State { node_type: NodeType },
-    Recovery,
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub enum Recovery {
+    Delete,
+    Shift { expected: SyntaxKind },
+}
+
+#[derive(Debug, Clone)]
+pub struct Annotation {
+    pub node_type: NodeType,
+    pub recovery: Option<Recovery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

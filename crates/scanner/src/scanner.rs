@@ -12,23 +12,23 @@ pub struct Scanner<'a> {
 
 impl<'a> Scanner<'a> {
     pub fn create(source: &'a str) -> Result<Self, anyhow::Error> {
-        let this = Self {
+        let mut this = Self {
             source,
             index: 0,
             lookahead: None,
         };
+        this.shift();
         Ok(this)
     }
 
     pub fn shift(&mut self) -> Option<Token> {
-        self.lookahead.take()
+        let lookahead = self.lookahead.take();
+        self.lookahead = self.scan_next();
+
+        lookahead
     }
 
-    pub fn lookahead(&mut self) -> Option<&Token> {
-        if self.lookahead.is_none() {
-            self.lookahead = self.scan_next();
-        }
-
+    pub fn lookahead(&self) -> Option<&Token> {
         self.lookahead.as_ref()
     }
 
@@ -60,6 +60,16 @@ impl<'a> Scanner<'a> {
         self.index = index;
 
         Some(Token { leading, main, trailing })
+    }
+
+    pub fn scope(&self) -> ScannerScope {
+        ScannerScope {
+            saved_index: self.index,
+        }
+    }
+
+    pub fn revert(&mut self, scope: ScannerScope) {
+        self.index = scope.saved_index;
     }
 }
 
@@ -125,7 +135,7 @@ fn scan_main(source: &str, index: usize, extra_scanners: &[usize]) -> Option<(us
                     tag, 
                     offset: index,
                     len: item.len, 
-                    value: Some(tag.text.to_string())
+                    value: Some(item.pattern.to_string())
                 };
                 return Some((item.offset + item.len, item));
             }
@@ -152,4 +162,8 @@ fn scan_main(source: &str, index: usize, extra_scanners: &[usize]) -> Option<(us
         value: Some(illegal_char.to_string()),
     };
     Some((item.offset + item.len, item))
+}
+
+pub struct ScannerScope {
+    saved_index: usize,
 }

@@ -145,8 +145,19 @@ impl Default for LookaheadTransition {
 pub enum TransitionEvent {
     Shift { syntax_kind: SyntaxKind, current_state: usize, next_state: usize },
     Reduce{ syntax_kind: SyntaxKind, current_state: usize, next_state: usize, pop_count: usize },
-    Error { syntax_kind: SyntaxKind, failed_state: usize, pop_count: usize, candidate_syntax_kinds: Vec<SyntaxKind> },
+    Error { syntax_kind: Option<SyntaxKind>, failed_state: usize },
     Accept{ current_state: usize, syntax_kind: SyntaxKind },
+}
+
+impl TransitionEvent {
+    pub fn next_state(&self) -> Option<usize> {
+        match self {
+            TransitionEvent::Shift { next_state, .. } => Some(*next_state),
+            TransitionEvent::Reduce { next_state, .. } => Some(*next_state),
+            TransitionEvent::Error { .. } => None,
+            TransitionEvent::Accept { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -2,8 +2,8 @@ use super::SyntaxKind;
 
 #[allow(non_upper_case_globals)] pub static r#SELECT: SyntaxKind = SyntaxKind { text: "SELECT", id: 201, is_keyword: true, is_terminal: true };
 #[allow(non_upper_case_globals)] pub static r#ID: SyntaxKind = SyntaxKind { text: "ID", id: 85, is_keyword: false, is_terminal: true };
-#[allow(non_upper_case_globals)] pub static r#DOT: SyntaxKind = SyntaxKind { text: "DOT", id: 218, is_keyword: true, is_terminal: true };
-#[allow(non_upper_case_globals)] pub static r#COMMA: SyntaxKind = SyntaxKind { text: "COMMA", id: 47, is_keyword: true, is_terminal: true };
+#[allow(non_upper_case_globals)] pub static r#DOT: SyntaxKind = SyntaxKind { text: "DOT", id: 218, is_keyword: false, is_terminal: true };
+#[allow(non_upper_case_globals)] pub static r#COMMA: SyntaxKind = SyntaxKind { text: "COMMA", id: 47, is_keyword: false, is_terminal: true };
 #[allow(non_upper_case_globals)] pub static r#FROM: SyntaxKind = SyntaxKind { text: "FROM", id: 221, is_keyword: true, is_terminal: true };
 #[allow(non_upper_case_globals)] pub static r#SEMI: SyntaxKind = SyntaxKind { text: "SEMI", id: 5, is_keyword: true, is_terminal: true };
 #[allow(non_upper_case_globals)] pub static r#EOF: SyntaxKind = SyntaxKind { text: "EOF", id: 191, is_keyword: true, is_terminal: true };

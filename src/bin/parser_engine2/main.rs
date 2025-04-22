@@ -1,7 +1,7 @@
 use std::collections::{LinkedList, VecDeque};
 use anyhow::bail;
 use sqlite_parser_proto::{
-    engine::{kinds as syntax_kind, resolve_parser_goto_state, resolve_parser_next_state, resolve_parser_accept_state}, 
+    engine::{resolve_parser_goto_state, resolve_parser_next_state, resolve_parser_accept_state}, 
     LookaheadTransition, SyntaxKind, TransitionEvent};
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -66,8 +66,8 @@ pub fn main() -> Result<(), anyhow::Error> {
                 println!("Accept/kind: {}, state: {}", syntax_kind.text, current_state);
                 break
             }
-            TransitionEvent::Error { syntax_kind, failed_state, pop_count, candidate_syntax_kinds:_kinds } => {
-                println!("Error/kind: {}, state: {}, pop: {}", syntax_kind.text, failed_state, pop_count);
+            TransitionEvent::Error { .. } => {
+                // println!("Error/kind: {}, state: {}, pop: {}", syntax_kind.text, failed_state, pop_count);
             }
         }
     }
