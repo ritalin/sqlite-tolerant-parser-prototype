@@ -229,7 +229,7 @@ fn parse_internal(
                 }
                 None => {
                     // FIXME: FatalError
-                    todo!()
+                    todo!("Fatal Error recover failed (Not implemented)");
                 }
             };
 
@@ -278,15 +278,27 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
 }
 
 fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
-    let annotation = Annotation { node_type: crate::NodeType::TokenSet, recovery: None };
-    let status = AnnotationStatus{ 
-        kind: token.main.tag,
-        range_from: token.offset_start(), 
-        len: token.token_len(), 
-    };
-    
+    match create_green_token_items(&token, main_kind, current_state, next_state, cache, annotations)? {
+        Some(node) => {
+            let annotation = Annotation { node_type: NodeType::TokenSet, recovery: None };
+            let status = AnnotationStatus{ 
+                kind: token.main.tag,
+                range_from: token.offset_start(), 
+                len: token.token_len(), 
+            };
+
+            let id = next_node_id();
+        
+            annotations.insert(id, (annotation, status));
+            Ok(Some((id, node)))
+        }
+        None => Ok(None),
+    }
+}
+
+fn create_green_token_items(token: &Token, main_kind: SyntaxKind, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option< NodeElement>, anyhow::Error> {
     let leading = 
-        token.leading.map(|items| {
+        token.leading.as_ref().map(|items| {
             items.iter().filter_map(|item| create_green_token_internal(item, NodeType::LeadingToken, current_state, next_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
@@ -299,7 +311,7 @@ fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize,
     };
 
     let trailing = 
-        token.trailing.map(|items| {
+        token.trailing.as_ref().map(|items| {
             items.iter().filter_map(|item| create_green_token_internal(item, NodeType::TrailingToken, current_state, next_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
@@ -318,11 +330,8 @@ fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize,
 
     use cstree::Syntax;
     let node = GreenNode::new(main_kind.into_raw(), children);
-    let id = next_node_id();
 
-    annotations.insert(id, (annotation, status));
-
-    Ok(Some((id, NodeElement::Node(node))))
+    Ok(Some(NodeElement::Node(node)))
 }
 
 fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_state: usize, next_state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>) -> Result<Option<NodeElement>, anyhow::Error> {
@@ -404,7 +413,6 @@ fn pop_elements(element_stack: &mut Vec<Option<NodeElementOrError>>, mut pop_cou
             }
             Some(Some(NodeElementOrError::Error{ id, element })) => {
                 elements.push((element, id));
-                pop_count -= 1;
             }
             _ => {}
         }
@@ -472,7 +480,22 @@ fn create_drop_error_node(lookahead: Option<Token>, state: usize, next_state: us
     };
     let kind = lookahead.main.tag;
 
-    create_green_token(lookahead, kind, state, next_state, cache, annotations)
+    match create_green_token_items(&lookahead, kind, state, next_state, cache, annotations)? {
+        Some(node) => {
+            let annotation = Annotation { node_type: NodeType::Error, recovery: Some(Recovery::Delete) };
+            let status = AnnotationStatus{ 
+                kind,
+                range_from: lookahead.offset_start(), 
+                len: lookahead.token_len(), 
+            };
+
+            let id = next_node_id();
+            annotations.insert(id, (annotation, status));
+
+            Ok(Some((id, node)))
+        }
+        None => Ok(None)
+    }
 }
 
 fn create_blank_error_node(offset: usize, state: usize, next_state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
@@ -519,6 +542,9 @@ fn replay_translation_event(
                 let node = create_green_node(*syntax_kind, *current_state, *next_state, *pop_count, element_stack, node_annotations)?;
                 
                 element_stack.push(node.map(|(id, element)| NodeElementOrError::into_element(id, element)));
+                for _ in 0..(*pop_count) {
+                    state_stack.pop();
+                }
                 state_stack.push(*next_state);
             }
             TransitionEvent::Accept { syntax_kind, current_state } => {
@@ -604,6 +630,9 @@ fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &Vec<usize>, l
     let scope = scanner.scope();
     let mut events = Vec::with_capacity(64);
     let mut state_stack = state_stack.clone();
+
+    // drop lookahead
+    scanner.shift();
     
     while let Some(lookahead) = scanner.lookahead() {
         if (lookahead.main.tag == syntax_kind::r#SEMI) || (lookahead.main.tag == syntax_kind::r#EOF) {

@@ -65,11 +65,13 @@ impl<'a> Scanner<'a> {
     pub fn scope(&self) -> ScannerScope {
         ScannerScope {
             saved_index: self.index,
+            saved_lookahead: self.lookahead.clone(),
         }
     }
 
     pub fn revert(&mut self, scope: ScannerScope) {
         self.index = scope.saved_index;
+        self.lookahead = scope.saved_lookahead;
     }
 }
 
@@ -166,4 +168,5 @@ fn scan_main(source: &str, index: usize, extra_scanners: &[usize]) -> Option<(us
 
 pub struct ScannerScope {
     saved_index: usize,
+    saved_lookahead: Option<Token>,
 }

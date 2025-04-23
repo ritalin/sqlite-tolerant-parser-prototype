@@ -82,48 +82,22 @@ mod parser_tests {
 
     #[test]
     fn test_unmatch_token_query() -> Result<(), anyhow::Error> {
-        let source = "SELECT a. FROM foo a";
+        let source = "SELECT 123 123 FROM foo;";
         let parser = Parser::new();
         let tree = parser.parse(&source)?;
 
-        let element = tree.root().covering_element(TextRange::new(TextSize::new(8), TextSize::new(10)));
-        let Some(node) = element.as_node() else {
+        // dump_tree(&tree);
+
+        let element = tree.root().covering_element(TextRange::new(TextSize::new(11), TextSize::new(14)));
+        let Some(node) = element.as_token() else {
             panic!("Covering element does not exist.");
         };
         
-        'token_set: {
-            assert_eq!(syntax_kind::r#DOT, node.kind());
-
-            let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(node)) else {
-                panic!("Node annotation must be assigned.");
-            };
-            assert_eq!(NodeType::TokenSet, annotation.node_type);
-
-            let children = node.children().collect::<Vec<_>>();
-            assert_eq!(2, children.len());
-            'token: {
-                assert_eq!(syntax_kind::r#DOT, children[0].kind());
-                let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
-                    panic!("Node annotation must be assigned.");
-                };
-                assert_eq!(NodeType::MainToken, annotation.node_type);
-                break 'token;
-            }
-            'token: {
-                assert_eq!(syntax_kind::r#SPACE, children[0].kind());
-                let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
-                    panic!("Node annotation must be assigned.");
-                };
-                assert_eq!(NodeType::TrailingToken, annotation.node_type);
-                break 'token;
-            }
-            break 'token_set;
-        };
         'error_node: {
-            assert_eq!(Some(syntax_kind::r#DOT), node.parent().map(|x| x.kind()));
+            assert_eq!(syntax_kind::r#INTEGER, node.parent().kind());
 
-            let error_node = node.parent().unwrap();
-            let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(error_node)) else {
+            let error_node = node.parent();
+            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node.syntax())) else {
                 panic!("Node annotation for parent must be assigned.");
             };
             assert_eq!(NodeType::Error, annotation.node_type);
@@ -136,6 +110,34 @@ mod parser_tests {
 
     #[test]
     fn test_brank_token_query() -> Result<(), anyhow::Error> {
-        todo!()
+        // 'token_set: {
+        //     assert_eq!(syntax_kind::r#DOT, node.kind());
+
+        //     let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(node)) else {
+        //         panic!("Node annotation must be assigned.");
+        //     };
+        //     assert_eq!(NodeType::TokenSet, annotation.node_type);
+
+        //     let children = node.children().collect::<Vec<_>>();
+        //     assert_eq!(2, children.len());
+        //     'token: {
+        //         assert_eq!(syntax_kind::r#DOT, children[0].kind());
+        //         let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
+        //             panic!("Node annotation must be assigned.");
+        //         };
+        //         assert_eq!(NodeType::MainToken, annotation.node_type);
+        //         break 'token;
+        //     }
+        //     'token: {
+        //         assert_eq!(syntax_kind::r#SPACE, children[0].kind());
+        //         let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
+        //             panic!("Node annotation must be assigned.");
+        //         };
+        //         assert_eq!(NodeType::TrailingToken, annotation.node_type);
+        //         break 'token;
+        //     }
+        //     break 'token_set;
+        // };
+       todo!()
     }
 }

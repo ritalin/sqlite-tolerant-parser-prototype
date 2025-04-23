@@ -64,8 +64,8 @@ impl SyntaxTree {
         self.root.display(&self.intern_cache)
     }
 
-    pub fn get_annotation_of(&self, node: ResolvedElementRef<SyntaxKind>) -> Option<Annotation> {
-        todo!()
+    pub fn get_annotation_of(&self, key: AnnotationKey) -> Option<&Annotation> {
+        self.annotations.get(&key).map(|(_, annotation)| annotation)
     }
 }
 
