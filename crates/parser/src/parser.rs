@@ -238,7 +238,7 @@ fn parse_internal(
     let lookahead = scanner.lookahead().cloned();
     let main_kind = lookahead.as_ref().map(|token| token.main.tag);
 
-    match parse_state(main_kind.as_ref(), *current_state, state_stack, language, true)? {
+    match parse_state(main_kind.as_ref(), *current_state, state_stack, language, false)? {
         TransitionEvent::Shift { current_state, .. } => {
             match scanner.shift() {
                 Some(token) if token.main.tag == terminte_kind => {
@@ -257,7 +257,7 @@ fn parse_internal(
             }
         }
         TransitionEvent::Reduce { syntax_kind: kind, current_state, pop_count, .. } => {
-            eprintln!("[DEBUG] kind: {}, nodes: [{:?}]", kind.text, syntax_kind_from_node(&element_stack));
+            // eprintln!("[DEBUG] kind: {}, nodes: [{:?}]", kind.text, syntax_kind_from_node(&element_stack));
             let node = create_green_node(kind, current_state, pop_count, element_stack, node_annotations)?;
             Ok(NodeGenerated::Node(node.map(|(id, element)| NodeElementOrError::into_element(id, element))))
         }
@@ -505,9 +505,10 @@ fn create_green_node(kind: SyntaxKind, current_state: usize, pop_count: usize, s
 }
 
 fn pop_elements(element_stack: &mut Vec<Option<NodeElementOrError>>, mut pop_count: usize) -> (Vec<NodeElement>, Vec<NodeId>) {
+    assert!(pop_count <= element_stack.len());
     let mut elements = Vec::with_capacity(pop_count + 1);
 
-    while (pop_count > 0) && (!element_stack.is_empty()) {
+    while pop_count > 0 {
         match element_stack.pop() {
             Some(Some(NodeElementOrError::Element{ id, element })) => {
                 elements.push((element, id));
@@ -524,7 +525,6 @@ fn pop_elements(element_stack: &mut Vec<Option<NodeElementOrError>>, mut pop_cou
         if pop_count == 0 { break }
     }
 
-    assert!(pop_count == 0);
 
     if let Some(Some(NodeElementOrError::Error{ id, element })) = element_stack.last() {
         elements.push((element.clone(), id.clone()));

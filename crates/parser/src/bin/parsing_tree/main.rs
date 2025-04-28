@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use cstree::{syntax::{SyntaxNode, SyntaxToken}, util::NodeOrToken};
 use parser::{AnnotationKey, Parser, SyntaxTree};
-use sqlite_parser_proto::{engine::kinds as syntax_kind, SyntaxKind};
+use sqlite_parser_proto::SyntaxKind;
 
 
 pub fn main() -> Result<(), anyhow::Error> {
@@ -74,11 +74,44 @@ fn dump_tree_internal(node: NodeOrToken<&SyntaxNode<SyntaxKind>, &SyntaxToken<Sy
     }
 }
 
+#[allow(unused)]
+fn covering_element(root: &SyntaxNode<SyntaxKind>, range: cstree::text::TextRange) -> Option<&SyntaxNode<SyntaxKind>> {
+    let iter = root.preorder()
+    .filter_map(|event| match event {
+        cstree::traversal::WalkEvent::Enter(node) => Some(node),
+        cstree::traversal::WalkEvent::Leave(_) => None,
+    });
+
+    if range.len() == Into::into(0) {
+        return iter
+            .skip_while(|node| node.text_range().start() < range.start())
+            .take_while(|node| node.text_range() == range)
+            .last()
+        ;
+    }
+
+    iter.take_while(|node| node.text_range().contains_range(range)).last()
+}
+
 #[cfg(test)]
 mod parser_tests {
-    use cstree::{syntax::SyntaxElementRef, text::{TextRange, TextSize}, traversal::WalkEvent};
+    use cstree::text::{TextRange, TextSize};
     use parser::{NodeType, Recovery};
+    use sqlite_parser_proto::engine::kinds as syntax_kind;
     use super::*;
+
+    #[test]
+    fn test_multiple_statement() -> Result<(), anyhow::Error> {
+        let source = "SELECT 123 FROM foo;SELECT 42;";
+        let parser = Parser::new();
+        let tree = parser.parse(&source)?;
+
+        // dump_tree(&tree);
+
+        assert_eq!(3, tree.root().children().count());
+
+        Ok(())
+    }
 
     #[test]
     fn test_unmatch_token_query() -> Result<(), anyhow::Error> {
@@ -108,31 +141,13 @@ mod parser_tests {
         Ok(())
     }
 
-    fn covering_element(root: &SyntaxNode<SyntaxKind>, range: TextRange) -> Option<&SyntaxNode<SyntaxKind>> {
-        let iter = root.preorder()
-        .filter_map(|event| match event {
-            cstree::traversal::WalkEvent::Enter(node) => Some(node),
-            cstree::traversal::WalkEvent::Leave(_) => None,
-        });
-
-        if range.len() == Into::into(0) {
-            return iter
-                .skip_while(|node| node.text_range().start() < range.start())
-                .take_while(|node| node.text_range() == range)
-                .last()
-            ;
-        }
-
-        iter.take_while(|node| node.text_range().contains_range(range)).last()
-    }
-
     #[test]
     fn test_brank_token_query() -> Result<(), anyhow::Error> {
         let source = "SELECT  FROM foo;";
         let parser = Parser::new();
         let tree = parser.parse(&source)?;
 
-        dump_tree(&tree);
+        // dump_tree(&tree);
 
         let element = covering_element(tree.root(), TextRange::new(TextSize::new(8), TextSize::new(8)));
         let Some(error_node) = element else {
