@@ -110,6 +110,8 @@ mod parser_tests {
 
         assert_eq!(3, tree.root().children().count());
 
+        let kinds = tree.root().children().enumerate().map(|(i, node)| (i, node.kind().text)).collect::<Vec<_>>();
+        assert_eq!(vec![(0,"ecmd" ), (1,"ecmd" ), (2,"ecmd" ), ], kinds);
         Ok(())
     }
 

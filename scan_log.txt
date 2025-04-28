@@ -1,0 +1,4 @@
+Token { leading: Some([TokenItem { range: 0..5, tag: ExtraWhitespace }, TokenItem { range: 5..74, tag: ExtraMarginalia }, TokenItem { range: 74..83, tag: ExtraWhitespace }]), main: TokenItem { range: 83..89, tag: Keyword("SELECT") }, trailing: Some([TokenItem { range: 89..90, tag: ExtraWhitespace }]) }
+--------------------
+Token { leading: None, main: TokenItem { range: 90..91, tag: Identifier }, trailing: None }
+--------------------

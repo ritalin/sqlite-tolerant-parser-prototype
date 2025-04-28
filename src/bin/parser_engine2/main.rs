@@ -5,7 +5,7 @@ use sqlite_parser_proto::{
     LookaheadTransition, SyntaxKind, TransitionEvent};
 
 pub fn main() -> Result<(), anyhow::Error> {
-    
+    use engine::syntax_kind;
     #[cfg(not(feature = "parser_generated"))]
     let mut tokens = VecDeque::<(SyntaxKind, Option<&str>)>::new();
     #[cfg(feature = "parser_generated")]
