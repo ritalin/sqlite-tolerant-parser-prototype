@@ -115,6 +115,13 @@ pub fn resolve_parser_accept_state(state: usize) -> Result<LookaheadTransition, 
     })
 }
 
+pub fn fetch_state_actions(state: usize) -> Vec<(&'static u32, &'static LookaheadTransition)> {
+    match states::LA_TRANSITION_TABLE.get(state) {
+        Some(map) => map.entries().collect(),
+        None => vec![]
+    }
+}
+
 pub fn eof_kind_id() -> u32 {
     states::EOF_TRANSITION_KIND
 }

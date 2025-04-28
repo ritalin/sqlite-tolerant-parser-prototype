@@ -142,6 +142,7 @@ impl Default for LookaheadTransition {
     }
 }
 
+#[derive(Clone)]
 pub enum TransitionEvent {
     Shift { syntax_kind: SyntaxKind, current_state: usize, next_state: usize },
     Reduce{ syntax_kind: SyntaxKind, current_state: usize, next_state: usize, pop_count: usize },

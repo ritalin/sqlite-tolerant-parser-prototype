@@ -28,8 +28,11 @@ impl Language {
     pub fn resolve_goto_state(&self, state: usize, kind_id: u32) -> Result<usize, anyhow::Error> {
         engine::resolve_parser_goto_state(state, kind_id)
     }
-}
 
+    pub fn fetch_state_actions(&self, state: usize) -> Vec<(&'static u32, &'static LookaheadTransition)> {
+        engine::fetch_state_actions(state)
+    }
+}
 
 pub struct SyntaxTree {
     root: SyntaxNode,
@@ -82,7 +85,7 @@ pub enum NodeType {
 #[derive(PartialEq, Eq, Clone, Debug)]
 pub enum Recovery {
     Delete,
-    Shift { expected: SyntaxKind },
+    Shift,
 }
 
 #[derive(Debug, Clone)]

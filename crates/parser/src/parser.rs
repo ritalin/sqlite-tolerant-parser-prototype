@@ -1,7 +1,9 @@
-use std::{collections::HashMap, time::Instant};
+use core::prelude::v1;
+use std::{collections::HashMap, rc::Rc, time::Instant};
 use anyhow::bail;
-use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, syntax::{SyntaxNode, SyntaxToken}, util::NodeOrToken};
-use scanner::{Scanner, Token, TokenItem};
+use cactus::Cactus;
+use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, syntax::{SyntaxNode, SyntaxToken}, util::NodeOrToken, Syntax};
+use scanner::{Scanner, ScannerScope, Token, TokenItem};
 use sqlite_parser_proto::{engine::kinds as syntax_kind, LookaheadTransition, SyntaxKind, TransitionEvent};
 use crate::{Annotation, InternCache, Language, NodeElement, NodeType, Recovery, SyntaxTree};
 
@@ -53,6 +55,72 @@ impl NodeElementOrError {
     }
 }
 
+#[derive(Clone)]
+struct StateStack {
+    initial: usize,
+    stack: Cactus<usize>
+}
+
+impl StateStack {
+    pub fn new(initial: usize) -> Self {
+        Self {
+            initial,
+            stack: Cactus::new().child(initial)
+        }
+    }
+
+    #[inline]
+    pub fn push(&mut self, val: usize) {
+        self.stack = self.stack.child(val);
+    } 
+
+    pub fn pop(&mut self) -> Option<usize> {
+        let val = self.stack.val().cloned();
+        self.stack = self.stack.parent().unwrap_or_default();
+        val
+    }
+
+    pub fn pop_n(&mut self, mut count: usize) {
+        while count > 0 {
+            let Some(parent) = self.stack.parent() else { break };
+            self.stack = parent;
+            count -= 1;
+        }
+
+        assert!(count == 0);
+    }
+
+    #[inline]
+    pub fn peek(&self) -> Option<&usize> {
+        self.stack.val()
+    }
+
+    pub fn reset(&mut self) {
+        self.stack = Cactus::new().child(self.initial);
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.stack.is_empty()
+    }
+
+    pub fn values(&self) -> Vec<usize> {
+        let mut values = vec![];
+
+        let mut next_node = self.stack.clone();
+        while let Some(v) = next_node.val() {
+            values.push(*v);
+            
+            let Some(node) = next_node.parent() else {
+                break
+            };
+            next_node = node;
+        }
+
+        values
+    }
+}
+
 thread_local! {
     static ID_GENERATOR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 }
@@ -73,7 +141,7 @@ impl Parser {
     }
 
     pub fn parse(&self, source: &str) -> Result<SyntaxTree, anyhow::Error> {
-        let mut state_stack = vec![0];
+        let mut state_stack = StateStack::new(0);
         let mut element_stack: Vec<Option<NodeElementOrError>> = vec![];
         let mut intern_cache = InternCache::new();
         let mut cache = NodeCache::with_interner(&mut intern_cache);
@@ -90,11 +158,11 @@ impl Parser {
         let mut root_members = vec![];
 
         while let Some(lookahead) = scanner.lookahead() {
-            if (lookahead.main.tag == syntax_kind::r#EOF) && state_stack.is_empty() {
-                let token = create_green_token(lookahead.clone(), lookahead.main.tag, usize::MAX, usize::MAX, &mut cache, &mut node_annotations)?;
+            if lookahead.main.tag == syntax_kind::r#EOF {
+                let token = create_green_token(lookahead.clone(), lookahead.main.tag, usize::MAX, &mut cache, &mut node_annotations)?;
                 element_stack.push(token.map(|(id, element)| NodeElementOrError::into_element(id, element)));
                 let state = state_stack.pop().unwrap_or(usize::MAX);
-                let root_member = create_green_node(root_member_kind, state, state, element_stack.len(), &mut element_stack, &mut node_annotations)?;
+                let root_member = create_green_node(root_member_kind, state, element_stack.len(), &mut element_stack, &mut node_annotations)?;
                 root_members.push(root_member);
                 break;
             }
@@ -110,7 +178,7 @@ impl Parser {
                 NodeGenerated::RootMember(element) => {
                     root_members.push(element);
 
-                    state_stack.clear();
+                    state_stack.reset();
                     element_stack.clear();
                 }
                 // NodeGenerated::Error { error, recovered } => {
@@ -157,7 +225,7 @@ enum NodeGenerated {
 
 fn parse_internal(
     scanner: &mut Scanner, 
-    state_stack: &mut Vec<usize>, 
+    state_stack: &mut StateStack, 
     element_stack: &mut Vec<Option<NodeElementOrError>>,
     node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
     cache: &mut NodeCache<InternCache>,
@@ -166,34 +234,35 @@ fn parse_internal(
     let root_member_kind = syntax_kind::r#ecmd;
     let terminte_kind = syntax_kind::r#SEMI;
     
-    let current_state = *state_stack.last().unwrap();
+    let current_state = state_stack.peek().unwrap();
     let lookahead = scanner.lookahead().cloned();
     let main_kind = lookahead.as_ref().map(|token| token.main.tag);
 
-    match parse_state(main_kind.as_ref(), current_state, state_stack, language)? {
-        TransitionEvent::Shift { current_state, next_state, .. } => {
+    match parse_state(main_kind.as_ref(), *current_state, state_stack, language, true)? {
+        TransitionEvent::Shift { current_state, .. } => {
             match scanner.shift() {
                 Some(token) if token.main.tag == terminte_kind => {
                     let kind = token.main.tag;
-                    let token = create_green_token(token, kind, current_state, next_state, cache, node_annotations)?;
+                    let token = create_green_token(token, kind, current_state, cache, node_annotations)?;
                     element_stack.push(token.map(|(id, element)| NodeElementOrError::into_element(id, element)));
-                    let root_member = create_green_node(root_member_kind, current_state, next_state, element_stack.len(), element_stack, node_annotations)?;
+                    let root_member = create_green_node(root_member_kind, current_state, element_stack.len(), element_stack, node_annotations)?;
                     Ok(NodeGenerated::RootMember(root_member))
                 }
                 Some(token) => {
                     let kind = token.main.tag;
-                    let node = create_green_token(token, kind, current_state, next_state, cache, node_annotations)?;
+                    let node = create_green_token(token, kind, current_state, cache, node_annotations)?;
                     Ok(NodeGenerated::Node(node.map(|(id, element)| NodeElementOrError::into_element(id, element))))
                 }
                 None => Ok(NodeGenerated::Node(None))
             }
         }
-        TransitionEvent::Reduce { syntax_kind: kind, current_state, next_state, pop_count } => {
-            let node = create_green_node(kind, current_state, next_state, pop_count, element_stack, node_annotations)?;
+        TransitionEvent::Reduce { syntax_kind: kind, current_state, pop_count, .. } => {
+            eprintln!("[DEBUG] kind: {}, nodes: [{:?}]", kind.text, syntax_kind_from_node(&element_stack));
+            let node = create_green_node(kind, current_state, pop_count, element_stack, node_annotations)?;
             Ok(NodeGenerated::Node(node.map(|(id, element)| NodeElementOrError::into_element(id, element))))
         }
         TransitionEvent::Accept { current_state, syntax_kind: kind } if ! element_stack.is_empty() => {
-            let root = create_green_node(kind, current_state, current_state, element_stack.len(), element_stack, node_annotations)?
+            let root = create_green_node(kind, current_state, element_stack.len(), element_stack, node_annotations)?
                 .and_then(|(_, element)| NodeElement::into_node(element))
                 .unwrap()
             ;
@@ -206,32 +275,59 @@ fn parse_internal(
             Ok(NodeGenerated::Root(root))
         }
         TransitionEvent::Error { failed_state, .. } => {
-            let mut journals = vec![];
-            if let Some(journal) = try_state_recovery_by_drop(scanner, state_stack, language) {
-                journals.push(journal);
-            }
+            eprintln!("(start recovery) --------------------------------------------------------------------------------");
+            let delete_candidate = try_state_recovery_by_drop(scanner, state_stack, language);
+            let shift_candidate = try_state_recovery_by_shift(scanner, state_stack, language)?;
 
-            let recovered = match journals.into_iter().max_by(|lhs, rhs| lhs.events.len().cmp(&rhs.events.len())) {
-                Some(Journal{ recovery, events }) if recovery == Recovery::Delete => {
-                    let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
-                    let error = create_drop_error_node(scanner.shift(), failed_state, next_state, cache, node_annotations)?;
-                    element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
-
-                    replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
+            let recovered = match (delete_candidate, shift_candidate) {
+                (Some(delete_journal), Some((_, shift_journal))) if delete_journal.score() > shift_journal.score() => {
+                    // Won by delete
+                    eprintln!("Won by delete#1");
+                    replay_delete_recovery(failed_state, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
-                Some(Journal{ events, .. }) => {
-                    let token_offset = lookahead.map(|token| token.offset_start()).unwrap_or_default();
-                    let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
-                    let error = create_blank_error_node(token_offset, failed_state, next_state, node_annotations)?;
-                    element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
-
-                    replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
+                (Some(_), Some((error_journal, shift_journal))) => {
+                    // Won by shift
+                    eprintln!("Won by shift#1");
+                    replay_shift_recovery(&error_journal.events, &shift_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
-                None => {
-                    // FIXME: FatalError
+                (Some(delete_journal), None) => {
+                    // Won by delete
+                    eprintln!("Won by delete#2");
+                    replay_delete_recovery(failed_state, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
+                }
+                (None, Some((error_journal, shift_journal))) => {
+                    // Won by shift
+                    eprintln!("Won by shift#2");
+                    replay_shift_recovery(&error_journal.events, &shift_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
+                }
+                (None, None) => {
+                    // FIXME: Fatal Error
                     todo!("Fatal Error recover failed (Not implemented)");
                 }
             };
+
+            // let recovered = match journals.into_iter().max_by(|lhs, rhs| lhs.events.len().cmp(&rhs.events.len())) {
+            //     Some(Journal{ recovery, events }) if recovery == Recovery::Delete => {
+            //         let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
+            //         let error = create_drop_error_node(scanner.shift(), failed_state, next_state, cache, node_annotations)?;
+            //         element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
+
+            //         replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
+            //     }
+            //     Some(Journal{ events, .. }) => {
+            //         let token_offset = lookahead.map(|token| token.offset_start()).unwrap_or_default();
+            //         let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
+            //         let error = create_blank_error_node(token_offset, failed_state, next_state, node_annotations)?;
+            //         element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
+
+            //         replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
+            //     }
+            //     None => {
+            //         // FIXME: FatalError
+            //         todo!("Fatal Error recover failed (Not implemented)");
+            //     }
+            // };
+            eprintln!("(finish recovery) --------------------------------------------------------------------------------");
 
             match recovered {
                 Some(recovered) => {
@@ -245,25 +341,39 @@ fn parse_internal(
     }
 }
 
-fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack: &mut Vec<usize>, language: &Language) -> Result<TransitionEvent, anyhow::Error> {
+fn syntax_kind_from_node(elements: &[Option<NodeElementOrError>]) -> Vec<String> {
+    elements.iter()
+    .map(|x| match x {
+        Some(NodeElementOrError::Element { element, .. }) => {
+            SyntaxKind::from_raw(element.kind()).text.to_string()
+        }
+        Some(NodeElementOrError::Error { element, .. }) => {
+            SyntaxKind::from_raw(element.kind()).text.to_string()
+        }
+        None => "(opt)".to_string(),
+    })
+    .collect()
+}
+
+fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack: &mut StateStack, language: &Language, log_enabled: bool) -> Result<TransitionEvent, anyhow::Error> {
     let event = match (language.resolve_lookahead_state(lookahead, current_state), lookahead) {
         (Ok(LookaheadTransition::Shift { next_state }), Some(lookahead)) => {
             let tag = lookahead.clone();
 
             state_stack.push(next_state);
+            if log_enabled { eprintln!("[DEBUG] Shift/kind: {}, push: {:?}", tag.text, state_stack.values()); }
             TransitionEvent::Shift { syntax_kind: tag, next_state, current_state }  
         }
         (Ok(LookaheadTransition::Reduce { pop_count, lhs }), _) => {
+            state_stack.pop_n(pop_count);
             use cstree::Syntax;
-            for _ in 0..pop_count {
-                state_stack.pop();
-            }
             
-            let peek = *state_stack.last().unwrap();
+            let peek = *state_stack.peek().unwrap();
             let next_state = language.resolve_goto_state(peek, lhs)?;
             let kind = SyntaxKind::from_raw(cstree::RawSyntaxKind(lhs));
             
             state_stack.push(next_state);
+            if log_enabled { eprintln!("[DEBUG] Reduce/kind: {}, pop({})&push: {:?}", kind.text, pop_count, state_stack.values()); }
             TransitionEvent::Reduce { next_state, current_state, pop_count, syntax_kind: kind }
         }
         (Ok(LookaheadTransition::Accept { last_kind, .. }), _) => {
@@ -277,16 +387,11 @@ fn parse_state(lookahead: Option<&SyntaxKind>, current_state: usize, state_stack
     Ok(event)
 }
 
-fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
-    match create_green_token_items(&token, main_kind, current_state, next_state, cache, annotations)? {
+fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+    match create_green_token_items(&token, main_kind, current_state, cache, annotations)? {
         Some(node) => {
             let annotation = Annotation { node_type: NodeType::TokenSet, recovery: None };
-            let status = AnnotationStatus{ 
-                kind: token.main.tag,
-                range_from: token.offset_start(), 
-                len: token.token_len(), 
-            };
-
+            let status = AnnotationStatus::new(&token);
             let id = next_node_id();
         
             annotations.insert(id, (annotation, status));
@@ -296,23 +401,23 @@ fn create_green_token(token: Token, main_kind: SyntaxKind, current_state: usize,
     }
 }
 
-fn create_green_token_items(token: &Token, main_kind: SyntaxKind, current_state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option< NodeElement>, anyhow::Error> {
+fn create_green_token_items(token: &Token, main_kind: SyntaxKind, current_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option< NodeElement>, anyhow::Error> {
     let leading = 
         token.leading.as_ref().map(|items| {
-            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::LeadingToken, current_state, next_state, annotations, cache).transpose())
+            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::LeadingToken, current_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
     ;
 
-    let main = match create_green_token_internal(&token.main, NodeType::MainToken, current_state, next_state, annotations, cache)? {
+    let main = match create_green_token_internal(&token.main, NodeType::MainToken, current_state, annotations, cache)? {
         Some(main) => Some(vec![main]),
         None => None,
     };
 
     let trailing = 
         token.trailing.as_ref().map(|items| {
-            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::TrailingToken, current_state, next_state, annotations, cache).transpose())
+            items.iter().filter_map(|item| create_green_token_internal(item, NodeType::TrailingToken, current_state, annotations, cache).transpose())
             .collect::<Result<Vec<_>, _>>()
         })
         .transpose()?
@@ -334,7 +439,7 @@ fn create_green_token_items(token: &Token, main_kind: SyntaxKind, current_state:
     Ok(Some(NodeElement::Node(node)))
 }
 
-fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_state: usize, next_state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>) -> Result<Option<NodeElement>, anyhow::Error> {
+fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>) -> Result<Option<NodeElement>, anyhow::Error> {
     let mut builder = cstree::build::GreenNodeBuilder::<SyntaxKind, InternCache>::with_cache(cache);
     builder.start_node(token.tag);
 
@@ -347,7 +452,7 @@ fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_s
             builder.token(token.tag, &s);
         }
         _ => {
-            bail!("Unexpected shift state (kind: {:?}, input: {:?}, state: {} -> {})", token.tag, token.value, current_state, next_state);
+            bail!("Unexpected shift state (kind: {:?}, input: {:?}, state: {})", token.tag, token.value, current_state);
         }
     }
 
@@ -373,7 +478,7 @@ fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_s
     Ok(node)
 }
 
-fn create_green_node(kind: SyntaxKind, current_state: usize, next_state: usize, pop_count: usize, stack: &mut Vec<Option<NodeElementOrError>>, annotation_map: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+fn create_green_node(kind: SyntaxKind, current_state: usize, pop_count: usize, stack: &mut Vec<Option<NodeElementOrError>>, annotation_map: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
     use cstree::Syntax;
     let (children, id_set) = pop_elements(stack, pop_count);
 
@@ -402,7 +507,7 @@ fn create_green_node(kind: SyntaxKind, current_state: usize, next_state: usize, 
 fn pop_elements(element_stack: &mut Vec<Option<NodeElementOrError>>, mut pop_count: usize) -> (Vec<NodeElement>, Vec<NodeId>) {
     let mut elements = Vec::with_capacity(pop_count + 1);
 
-    while pop_count > 0 {
+    while (pop_count > 0) && (!element_stack.is_empty()) {
         match element_stack.pop() {
             Some(Some(NodeElementOrError::Element{ id, element })) => {
                 elements.push((element, id));
@@ -418,6 +523,8 @@ fn pop_elements(element_stack: &mut Vec<Option<NodeElementOrError>>, mut pop_cou
         }
         if pop_count == 0 { break }
     }
+
+    assert!(pop_count == 0);
 
     if let Some(Some(NodeElementOrError::Error{ id, element })) = element_stack.last() {
         elements.push((element.clone(), id.clone()));
@@ -474,13 +581,13 @@ fn resolve_anotation_status_children(
     }
 }
 
-fn create_drop_error_node(lookahead: Option<Token>, state: usize, next_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+fn create_drop_error_node(lookahead: Option<Token>, state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
     let Some(lookahead) = lookahead else {
-        return create_blank_error_node(0, state, next_state, annotations);
+        return Ok(None);
     };
     let kind = lookahead.main.tag;
 
-    match create_green_token_items(&lookahead, kind, state, next_state, cache, annotations)? {
+    match create_green_token_items(&lookahead, kind, state, cache, annotations)? {
         Some(node) => {
             let annotation = Annotation { node_type: NodeType::Error, recovery: Some(Recovery::Delete) };
             let status = AnnotationStatus{ 
@@ -498,19 +605,14 @@ fn create_drop_error_node(lookahead: Option<Token>, state: usize, next_state: us
     }
 }
 
-fn create_blank_error_node(offset: usize, state: usize, next_state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+fn create_blank_error_node(state: usize, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
     use cstree::Syntax;
 
     // FIXME: need blank token kind
     let kind = syntax_kind::r#ILLEGAL;
     let node = cstree::green::GreenNode::new(kind.into_raw(), vec![]);
-    let id = next_node_id();
 
-    let annotation = Annotation { node_type: crate::NodeType::Node, recovery: None };
-    let staus = AnnotationStatus{ kind, range_from: offset, len: 0 };
-
-    annotations.insert(id, (annotation, staus));
-    Ok(Some((id, NodeElement::Node(node))))
+    Ok(Some(NodeElement::Node(node)))
 }
 
 fn create_fatal_error_node() -> Result<NodeElement, anyhow::Error> {
@@ -522,9 +624,61 @@ fn create_fatal_error_node() -> Result<NodeElement, anyhow::Error> {
     Ok(NodeElement::Node(node))
 }
 
+fn replay_delete_recovery(
+    failed_state: usize,
+    events: &[TransitionEvent], 
+    scanner: &mut Scanner, 
+    state_stack: &mut StateStack, 
+    element_stack: &mut Vec<Option<NodeElementOrError>>,
+    node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
+    cache: &mut NodeCache<InternCache>) -> Result<Option<NodeGenerated>, anyhow::Error> 
+{
+    let error = create_drop_error_node(scanner.shift(), failed_state, cache, node_annotations)?;
+    element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
+
+    let result =replay_translation_event(events, NodeType::TokenSet, None, scanner, state_stack, element_stack, node_annotations, cache)?;
+    if result.is_some() {
+        return Ok(result);
+    }
+
+    match element_stack.pop() {
+        Some(node) => {
+            Ok(Some(NodeGenerated::Node(node)))
+        }
+        None => Ok(None)
+    }
+}
+
+fn replay_shift_recovery(
+    error_events: &[TransitionEvent],
+    events: &[TransitionEvent], 
+    scanner: &mut Scanner, 
+    state_stack: &mut StateStack, 
+    element_stack: &mut Vec<Option<NodeElementOrError>>,
+    node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
+    cache: &mut NodeCache<InternCache>) -> Result<Option<NodeGenerated>, anyhow::Error> 
+{
+    replay_translation_event(error_events, NodeType::Error, Some(Recovery::Shift), scanner, state_stack, element_stack, node_annotations, cache)?;
+    
+    let result = replay_translation_event(events, NodeType::TokenSet, None, scanner, state_stack, element_stack, node_annotations, cache)?;
+    if result.is_some() {
+        return Ok(result);
+    }
+
+    match element_stack.pop() {
+        Some(node) => {
+            Ok(Some(NodeGenerated::Node(node)))
+        }
+        None => Ok(None)
+    }
+}
+
 fn replay_translation_event(
-    events: &[TransitionEvent], scanner: &mut Scanner, 
-    state_stack: &mut Vec<usize>, 
+    events: &[TransitionEvent], 
+    node_type: NodeType, 
+    recovery_type: Option<Recovery>,
+    scanner: &mut Scanner, 
+    state_stack: &mut StateStack, 
     element_stack: &mut Vec<Option<NodeElementOrError>>,
     node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
     cache: &mut NodeCache<InternCache>) -> Result<Option<NodeGenerated>, anyhow::Error> 
@@ -532,23 +686,47 @@ fn replay_translation_event(
     for event in events {
         match event {
             TransitionEvent::Shift { syntax_kind, current_state, next_state } => {
-                let token = scanner.shift().unwrap();
-                let node = create_green_token(token, *syntax_kind, *current_state, *next_state, cache, node_annotations)?;
-
-                element_stack.push(node.map(|(id, element)| NodeElementOrError::into_element(id, element)));
+                match recovery_type {
+                    Some(Recovery::Shift) => {
+                        let token = scanner.lookahead().unwrap();
+                        create_blank_error_node(*current_state, node_annotations)?
+                        .map(|node| {
+                            let kind = SyntaxKind::from_raw(node.kind());
+                            let annotation = Annotation { node_type: node_type.clone(), recovery: recovery_type.clone() };
+                            let status = AnnotationStatus { kind, range_from: token.offset_start(), len: 0 };
+                            let id = next_node_id();
+                        
+                            node_annotations.insert(id, (annotation, status));
+                            element_stack.push(Some(NodeElementOrError::into_element(id, node)));
+                        });
+                    }
+                    _ => {
+                        let token = scanner.shift().unwrap();
+                        create_green_token_items(&token, *syntax_kind, *current_state, cache, node_annotations)?
+                        .map(|node| {
+                            let annotation = Annotation { node_type: node_type.clone(), recovery: recovery_type.clone() };
+                            let status = AnnotationStatus::new(&token);
+                            let id = next_node_id();
+                        
+                            node_annotations.insert(id, (annotation, status));
+                            element_stack.push(Some(NodeElementOrError::into_element(id, node)));
+                        });
+                    }
+                };
+                
                 state_stack.push(*next_state);
+                eprintln!("[DEBUG] Shift/kind: {}, push ({:?})", syntax_kind.text, state_stack.values());
             }
             TransitionEvent::Reduce { syntax_kind, current_state, next_state, pop_count } => {
-                let node = create_green_node(*syntax_kind, *current_state, *next_state, *pop_count, element_stack, node_annotations)?;
+                let node = create_green_node(*syntax_kind, *current_state, *pop_count, element_stack, node_annotations)?;
                 
                 element_stack.push(node.map(|(id, element)| NodeElementOrError::into_element(id, element)));
-                for _ in 0..(*pop_count) {
-                    state_stack.pop();
-                }
+                state_stack.pop_n(*pop_count);
                 state_stack.push(*next_state);
+                eprintln!("[DEBUG] Reduce/kind: {}, pop({})&push ({:?})", syntax_kind.text, pop_count, state_stack.values());
             }
             TransitionEvent::Accept { syntax_kind, current_state } => {
-                let root = create_green_node(*syntax_kind, *current_state, *current_state, element_stack.len(), element_stack, node_annotations)?
+                let root = create_green_node(*syntax_kind, *current_state, element_stack.len(), element_stack, node_annotations)?
                     .and_then(|(_, element)| NodeElement::into_node(element))
                     .unwrap()
                 ;
@@ -561,12 +739,7 @@ fn replay_translation_event(
         }
     }
 
-    match element_stack.pop() {
-        Some(node) => {
-            Ok(Some(NodeGenerated::Node(node)))
-        }
-        None => Ok(None)
-    }
+    Ok(None)
 }
 
 fn create_syntax_tree(root: GreenNode, intern_cache: InternCache, node_annotations: HashMap<NodeId, (Annotation, AnnotationStatus)>, resolve_rules: &HashMap<(SyntaxKind, SyntaxKind), SyntaxKind>, language: &Language) -> SyntaxTree {
@@ -594,6 +767,16 @@ struct AnnotationStatus {
     kind: SyntaxKind,
     range_from: usize,
     len: usize,
+}
+
+impl AnnotationStatus {
+    pub fn new(token: &Token) -> Self {
+        Self {
+            kind: token.main.tag,
+            range_from: token.offset_start(),
+            len: token.token_len(),    
+        }
+    }
 }
 
 impl PartialEq for AnnotationStatus {
@@ -626,21 +809,209 @@ struct Journal {
     events: Vec<TransitionEvent>,
 }
 
-fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &Vec<usize>, language: &Language) -> Option<Journal> {
-    let scope = scanner.scope();
-    let mut events = Vec::with_capacity(64);
-    let mut state_stack = state_stack.clone();
+impl Journal {
+    pub fn score(&self) -> usize {
+        self.events.iter()
+        .filter(|event| if let TransitionEvent::Shift { .. } = event { true } else { false })
+        .count()
+    }
+}
 
+fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &StateStack, language: &Language) -> Option<Journal> {
+    let scope = scanner.scope();
     // drop lookahead
     scanner.shift();
+
+    let journal = try_state_recovery_internal(scanner, state_stack, language)
+        .map(|events| Journal { events, recovery: Recovery::Delete })
+    ;
+    scanner.revert(scope);
+    
+    journal
+}
+
+#[derive(Clone)]
+struct ShiftRecoveryItem {
+    state_stack: StateStack,
+    next_state: usize,
+    kind: SyntaxKind,
+    index: usize,
+    parent: Option<Rc<ShiftRecoveryItem>>,
+    event: TransitionEvent,
+}
+
+fn try_state_recovery_by_shift(scanner: &mut Scanner, state_stack: &StateStack, language: &Language) -> Result<Option<(Journal, Journal)>, anyhow::Error> {
+    let scope = scanner.scope();
+
+    let Some(current_state) = state_stack.peek() else {
+        scanner.revert(scope);
+        return Ok(None);
+    };
+
+    let max_depth = 9;
+    let state_stack = state_stack.clone();
+    let histories = fetch_shift_candidates(&state_stack, *current_state, None, 0, max_depth, language);
+
+    let Some((error_journal, journal)) = try_state_recovery_by_shift_internal_ph1(histories, scanner, *current_state, language, max_depth)? else {
+        scanner.revert(scope);
+        return Ok(None);
+    };
+
+    scanner.revert(scope);
+    
+    Ok(Some((error_journal, journal)))
+}
+
+fn fetch_shift_candidates(state_stack: &StateStack, current_state: usize, parent: Option<Rc<ShiftRecoveryItem>>, depth: usize, sampling_rate: usize, language: &Language) -> Vec<Rc<ShiftRecoveryItem>> {
+    let (shift_actions, reduce_actions): (Vec<_>, Vec<_>) = language.fetch_state_actions(current_state).into_iter()
+        .partition(|(_, transition)| match transition {
+            LookaheadTransition::Shift { .. } => true,
+            _ => false,
+        })
+    ;
+    let sampling_size = usize::max((shift_actions.len() + reduce_actions.len()) >> sampling_rate , 1);
+    
+    let mut items = Vec::with_capacity(sampling_size * 2);
+    // Sampling shift actions
+    fetch_shift_candidates_internal(&shift_actions, state_stack, parent.clone(), depth, sampling_size, language, &mut items);
+    // Sampling reduce actions
+    fetch_shift_candidates_internal(&reduce_actions, state_stack, parent.clone(), depth, sampling_size * 2 - items.len(), language, &mut items);
+
+    items
+}
+
+fn fetch_shift_candidates_internal(actions: &[(&u32, &LookaheadTransition)], state_stack: &StateStack, parent: Option<Rc<ShiftRecoveryItem>>, depth: usize, sampling_size: usize, language: &Language, items: &mut Vec<Rc<ShiftRecoveryItem>>) {
+    let Some(current_state) = state_stack.peek() else {
+        return;
+    };
+
+    let mut used_ids = std::collections::HashSet::new();
+    let mut reduce_kind = std::collections::HashSet::new();
+
+    let iter = actions.into_iter()
+        .filter(|(id, _)| used_ids.insert(*id))
+        .map(|(id, _)| id)
+        .filter_map(|&id| {
+            let mut state_stack = state_stack.clone();
+            use cstree::Syntax;
+            let kind = SyntaxKind::from_raw(cstree::RawSyntaxKind(*id));
+            match parse_state(Some(&kind), *current_state, &mut state_stack, language, false) {
+                Ok(TransitionEvent::Shift { syntax_kind, current_state, next_state }) => {
+                    Some(Rc::new(ShiftRecoveryItem{ 
+                        state_stack,
+                        next_state,
+                        kind: syntax_kind.clone(),
+                        index: depth,
+                        parent: parent.clone(), 
+                        event: TransitionEvent::Shift { syntax_kind, current_state, next_state }, 
+                    }))
+                }
+                Ok(TransitionEvent::Reduce { syntax_kind, current_state, next_state, pop_count }) if reduce_kind.insert(syntax_kind) => {    
+                    Some(Rc::new(ShiftRecoveryItem{ 
+                        state_stack,
+                        next_state,
+                        kind: syntax_kind.clone(),
+                        index: depth,
+                        parent: parent.clone(), 
+                        event: TransitionEvent::Reduce { syntax_kind, current_state, next_state, pop_count }, 
+                    }))
+                }
+                _ => None,
+            }
+        })
+        .take(sampling_size)
+    ;
+
+    items.extend(iter);
+
+}
+
+fn try_state_recovery_by_shift_internal_ph1(
+    mut histories: Vec<Rc<ShiftRecoveryItem>>,
+    scanner: &mut Scanner,
+    current_state: usize,
+    language: &Language,
+    max_depth: usize) -> Result<Option<(Journal, Journal)>, anyhow::Error>
+{
+    let mut best_history = None;
+    let mut best_events = None;
+
+    let mut depth = 0;
+
+    let Some(lookahead) = scanner.lookahead().cloned() else {
+        return Ok(None)
+    };
+
+    while depth < max_depth {
+        let mut next_histories = vec![];
+
+        for history in histories {
+            match (lookahead.main.tag == history.kind, history.parent.as_ref()) {
+                (true, Some(parent)) => {
+                    // to ph2
+                    let scope = scanner.scope();
+                    let candidate = try_state_recovery_by_shift_internal_ph2(scanner, parent.clone(), language);
+                    if judge_shift_recover_candidate(best_events.as_ref(), candidate.as_ref()) {
+                        best_history = history.parent.clone();
+                        best_events = candidate;
+                    }
+                    scanner.revert(scope);
+                }
+                _ => {
+                    next_histories.extend(fetch_shift_candidates(&history.state_stack, history.next_state, Some(history.clone()), depth + 1, max_depth - depth - 1, language));
+                }
+            }
+        }
+
+        depth += 1;
+        histories = next_histories;
+    }
+
+    let best_error_journal = journal_from_shift_history(best_history, max_depth);
+
+    Ok(best_error_journal.zip(best_events))
+}
+
+fn try_state_recovery_by_shift_internal_ph2(scanner: &mut Scanner, history: Rc<ShiftRecoveryItem>, language: &Language) -> Option<Journal> {
+    let mut state_stack = history.state_stack.clone();
+    try_state_recovery_internal(scanner, &mut state_stack, language)
+    .map(|events| Journal { events, recovery: Recovery::Shift })
+}
+
+fn judge_shift_recover_candidate(lhs: Option<&Journal>, rhs: Option<&Journal>) -> bool {
+    match (lhs, rhs) {
+        (Some(l_journal), Some(r_journal)) if l_journal.score() < r_journal.score() => true,
+        (None, Some(_)) => true,
+        _ => false
+    }
+}
+
+fn journal_from_shift_history(mut history: Option<Rc<ShiftRecoveryItem>>, max_depth: usize) -> Option<Journal> {
+    let mut error_events = Vec::with_capacity(max_depth);
+    error_events.resize(max_depth, None);
+
+    while let Some(h) = history {
+        error_events[h.index] = Some(h.event.clone());
+        history = h.parent.clone();
+    }
+
+    Some(Journal { 
+        events: error_events.into_iter().filter_map(|event| event).collect(), 
+        recovery: Recovery::Shift 
+    })
+}
+
+fn try_state_recovery_internal(scanner: &mut Scanner, state_stack: &StateStack, language: &Language) -> Option<Vec<TransitionEvent>> {
+    let mut events = Vec::with_capacity(64);
+    let mut state_stack = state_stack.clone();
     
     while let Some(lookahead) = scanner.lookahead() {
         if (lookahead.main.tag == syntax_kind::r#SEMI) || (lookahead.main.tag == syntax_kind::r#EOF) {
             break
         }
-        let current_state = *state_stack.last().unwrap();
+        let current_state = state_stack.peek().unwrap();
     
-        match parse_state(Some(&lookahead.main.tag), current_state, &mut state_stack, language) {
+        match parse_state(Some(&lookahead.main.tag), *current_state, &mut state_stack, language, false) {
             Ok(TransitionEvent::Error { .. }) => return None,
             Err(_) => return None,
             Ok(TransitionEvent::Shift { syntax_kind, current_state, next_state }) => {
@@ -660,14 +1031,6 @@ fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &Vec<usize>, l
             }
         }
     }
-    scanner.revert(scope);
-    
-    Some(Journal { recovery: Recovery::Delete, events })
-}
 
-fn try_state_recovery_by_shift(scanner: &mut Scanner, start_state: usize, language: &Language) -> Option<Journal> {
-
-    let scope = scanner.scope();
-    scanner.revert(scope);
-    todo!()
+    Some(events)
 }

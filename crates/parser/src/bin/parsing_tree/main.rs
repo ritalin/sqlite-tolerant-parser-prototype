@@ -76,13 +76,13 @@ fn dump_tree_internal(node: NodeOrToken<&SyntaxNode<SyntaxKind>, &SyntaxToken<Sy
 
 #[cfg(test)]
 mod parser_tests {
-    use cstree::text::{TextRange, TextSize};
+    use cstree::{syntax::SyntaxElementRef, text::{TextRange, TextSize}, traversal::WalkEvent};
     use parser::{NodeType, Recovery};
     use super::*;
 
     #[test]
     fn test_unmatch_token_query() -> Result<(), anyhow::Error> {
-        let source = "SELECT 123 123 FROM foo;";
+        let source = "SELECT 123 DELETE FROM foo;";
         let parser = Parser::new();
         let tree = parser.parse(&source)?;
 
@@ -94,7 +94,7 @@ mod parser_tests {
         };
         
         'error_node: {
-            assert_eq!(syntax_kind::r#INTEGER, node.parent().kind());
+            assert_eq!(syntax_kind::r#DELETE, node.parent().kind());
 
             let error_node = node.parent();
             let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node.syntax())) else {
@@ -108,36 +108,48 @@ mod parser_tests {
         Ok(())
     }
 
+    fn covering_element(root: &SyntaxNode<SyntaxKind>, range: TextRange) -> Option<&SyntaxNode<SyntaxKind>> {
+        let iter = root.preorder()
+        .filter_map(|event| match event {
+            cstree::traversal::WalkEvent::Enter(node) => Some(node),
+            cstree::traversal::WalkEvent::Leave(_) => None,
+        });
+
+        if range.len() == Into::into(0) {
+            return iter
+                .skip_while(|node| node.text_range().start() < range.start())
+                .take_while(|node| node.text_range() == range)
+                .last()
+            ;
+        }
+
+        iter.take_while(|node| node.text_range().contains_range(range)).last()
+    }
+
     #[test]
     fn test_brank_token_query() -> Result<(), anyhow::Error> {
-        // 'token_set: {
-        //     assert_eq!(syntax_kind::r#DOT, node.kind());
+        let source = "SELECT  FROM foo;";
+        let parser = Parser::new();
+        let tree = parser.parse(&source)?;
 
-        //     let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(node)) else {
-        //         panic!("Node annotation must be assigned.");
-        //     };
-        //     assert_eq!(NodeType::TokenSet, annotation.node_type);
+        dump_tree(&tree);
 
-        //     let children = node.children().collect::<Vec<_>>();
-        //     assert_eq!(2, children.len());
-        //     'token: {
-        //         assert_eq!(syntax_kind::r#DOT, children[0].kind());
-        //         let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
-        //             panic!("Node annotation must be assigned.");
-        //         };
-        //         assert_eq!(NodeType::MainToken, annotation.node_type);
-        //         break 'token;
-        //     }
-        //     'token: {
-        //         assert_eq!(syntax_kind::r#SPACE, children[0].kind());
-        //         let Some(annotation) = tree.get_annotation_of(cstree::util::NodeOrToken::Node(children[0])) else {
-        //             panic!("Node annotation must be assigned.");
-        //         };
-        //         assert_eq!(NodeType::TrailingToken, annotation.node_type);
-        //         break 'token;
-        //     }
-        //     break 'token_set;
-        // };
-       todo!()
+        let element = covering_element(tree.root(), TextRange::new(TextSize::new(8), TextSize::new(8)));
+        let Some(error_node) = element else {
+            panic!("Covering element does not exist.");
+        };
+        
+        'error_node: {
+            assert_eq!(syntax_kind::r#ILLEGAL, error_node.kind());
+
+            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node)) else {
+                panic!("Node annotation for parent must be assigned.");
+            };
+            assert_eq!(NodeType::Error, annotation.node_type);
+            assert_eq!(Some(Recovery::Shift), annotation.recovery);
+            break 'error_node;
+        }
+        
+        Ok(())
     }
 }

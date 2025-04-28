@@ -64,14 +64,14 @@ impl<'a> Scanner<'a> {
 
     pub fn scope(&self) -> ScannerScope {
         ScannerScope {
-            saved_index: self.index,
-            saved_lookahead: self.lookahead.clone(),
+            next_index: self.index,
+            lookahead: self.lookahead.clone(),
         }
     }
 
     pub fn revert(&mut self, scope: ScannerScope) {
-        self.index = scope.saved_index;
-        self.lookahead = scope.saved_lookahead;
+        self.index = scope.next_index;
+        self.lookahead = scope.lookahead;
     }
 }
 
@@ -166,7 +166,8 @@ fn scan_main(source: &str, index: usize, extra_scanners: &[usize]) -> Option<(us
     Some((item.offset + item.len, item))
 }
 
+#[derive(Clone)]
 pub struct ScannerScope {
-    saved_index: usize,
-    saved_lookahead: Option<Token>,
+    pub next_index: usize,
+    pub lookahead: Option<Token>,
 }

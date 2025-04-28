@@ -13,6 +13,7 @@ scanner = { path = "../scanner" }
 cstree = { workspace = true }
 anyhow = { workspace = true }
 indexmap = "2.9.0"
+cactus = "1.0.7"
 
 [features]
 parser_generated = []
