@@ -60,9 +60,9 @@ fn dump_tree_internal(node: NodeOrToken<&SyntaxNode<SyntaxKind>, &SyntaxToken<Sy
         NodeOrToken::Token(x) => format!("`{}`", x.resolved().text().replace("\n", r"\n")),
     };
 
-    let node_type = annotations.get(&key).map(|(_, a)| format!("{:?}", a.node_type)).unwrap_or("?".to_string());
+    let node_type = annotations.get(&key).map(|(_, a)| format!("{:?} ({})", a.node_type, a.state)).unwrap_or("?".to_string());
 
-    println!("{:<16}{:<16}{}{} ({}) {}", 
+    println!("{:<16}{:<24}{}{} ({}) {}", 
         range_str, node_type,
         indent_str, kind.text, kind.id, value
     );
@@ -72,25 +72,6 @@ fn dump_tree_internal(node: NodeOrToken<&SyntaxNode<SyntaxKind>, &SyntaxToken<Sy
             dump_tree_internal(child, annotations, indent + 1);
         }
     }
-}
-
-#[allow(unused)]
-fn covering_element(root: &SyntaxNode<SyntaxKind>, range: cstree::text::TextRange) -> Option<&SyntaxNode<SyntaxKind>> {
-    let iter = root.preorder()
-    .filter_map(|event| match event {
-        cstree::traversal::WalkEvent::Enter(node) => Some(node),
-        cstree::traversal::WalkEvent::Leave(_) => None,
-    });
-
-    if range.len() == Into::into(0) {
-        return iter
-            .skip_while(|node| node.text_range().start() < range.start())
-            .take_while(|node| node.text_range() == range)
-            .last()
-        ;
-    }
-
-    iter.take_while(|node| node.text_range().contains_range(range)).last()
 }
 
 #[cfg(test)]
@@ -123,16 +104,18 @@ mod parser_tests {
 
         // dump_tree(&tree);
 
-        let element = tree.root().covering_element(TextRange::new(TextSize::new(11), TextSize::new(14)));
-        let Some(node) = element.as_token() else {
+        let element = tree.covering_element(TextRange::new(TextSize::new(11), TextSize::new(14)));
+        let Some(node) = element else {
             panic!("Covering element does not exist.");
         };
         
         'error_node: {
-            assert_eq!(syntax_kind::r#DELETE, node.parent().kind());
+            assert_eq!(Some(syntax_kind::r#DELETE), node.parent().map(|x| x.kind()));
 
-            let error_node = node.parent();
-            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node.syntax())) else {
+            let Some(error_node) = node.parent().map(|x| x.syntax()) else {
+                panic!("Covering error parent element does not exist.");
+            };
+            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node)) else {
                 panic!("Node annotation for parent must be assigned.");
             };
             assert_eq!(NodeType::Error, annotation.node_type);
@@ -151,7 +134,7 @@ mod parser_tests {
 
         // dump_tree(&tree);
 
-        let element = covering_element(tree.root(), TextRange::new(TextSize::new(8), TextSize::new(8)));
+        let element = tree.covering_element(TextRange::new(TextSize::new(8), TextSize::new(8)));
         let Some(error_node) = element else {
             panic!("Covering element does not exist.");
         };
@@ -159,7 +142,7 @@ mod parser_tests {
         'error_node: {
             assert_eq!(syntax_kind::r#ILLEGAL, error_node.kind());
 
-            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node)) else {
+            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node.syntax())) else {
                 panic!("Node annotation for parent must be assigned.");
             };
             assert_eq!(NodeType::Error, annotation.node_type);
@@ -167,6 +150,64 @@ mod parser_tests {
             break 'error_node;
         }
         
+        Ok(())
+    }
+
+    #[test]
+    fn test_incremental_parse_repairing() -> Result<(), anyhow::Error> {
+        let source0 = "SELECT  FROM foo;";
+        let parser = Parser::new();
+        let tree0 = parser.parse(source0)?;
+
+        // dump_tree(&tree0);
+
+        let source = "SELECT 123 FROM foo;";
+        let inc_parser = parser.incremental(&tree0, 
+            parser::EditScope { offset: 7, from_len: 7, to_len: 10 }
+        )?;
+        let tree = inc_parser.parse(source)?;
+
+        // eprintln!(">>> Dump AnnotationKeys");
+        // tree.root().preorder_with_tokens().filter_map(|event| match event {
+        //     cstree::traversal::WalkEvent::Enter(NodeOrToken::Node(node)) => {
+        //         Some(("Node", AnnotationKey::from(node.syntax())))
+        //     }
+        //     cstree::traversal::WalkEvent::Enter(NodeOrToken::Token(node)) => {
+        //         Some(("Token", AnnotationKey::from(node.syntax())))
+        //     }
+        //     cstree::traversal::WalkEvent::Leave(_) => None,
+        // })
+        // .for_each(|(tag, key)| {
+        //     eprintln!("key: {:?}, tag: {}", key, tag);
+        // });
+        // eprintln!("<<<\n----------");
+        // eprintln!(">>> Dump Annotations");
+        // tree.annotations.iter()
+        // .map(|(key, (id, a))| (key, a.node_type.clone(), id))
+        // .for_each(|(key, node_type, id)| {
+        //     eprintln!("key: {:?}, type: {:?}, id: {:?}", key, node_type, id);
+        // });
+        // eprintln!("<<<\n----------");
+
+        dump_tree(&tree);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_incremental_parse_breaking() -> Result<(), anyhow::Error> {
+        let source0 = "SELECT 123 FROM foo;";
+        let parser = Parser::new();
+        let tree0 = parser.parse(source0)?;
+
+        // dump_tree(&tree0);
+
+        let source = "SELECT 123 FROMbar foo;";
+        let inc_parser = parser.incremental(&tree0, 
+            parser::EditScope { offset: 15, from_len: 0, to_len: 3 }, 
+        )?;
+        let tree = inc_parser.parse(source)?;
+
         Ok(())
     }
 }

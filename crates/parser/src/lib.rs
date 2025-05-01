@@ -4,7 +4,7 @@ use cstree::{green::{GreenNode, GreenToken}, interning::{InternKey, TokenKey}, s
 use sqlite_parser_proto::{engine, LookaheadTransition, SyntaxKind};
 
 mod parser;
-pub use parser::{Parser, AnnotationKey, NodeId};
+pub use parser::{Parser, AnnotationKey, NodeId, EditScope};
 
 pub type SyntaxNode = cstree::syntax::ResolvedNode<SyntaxKind>;
 
@@ -34,6 +34,7 @@ impl Language {
     }
 }
 
+#[derive(Clone)]
 pub struct SyntaxTree {
     root: SyntaxNode,
     language: Language,
@@ -70,6 +71,36 @@ impl SyntaxTree {
     pub fn get_annotation_of(&self, key: AnnotationKey) -> Option<&Annotation> {
         self.annotations.get(&key).map(|(_, annotation)| annotation)
     }
+
+    pub fn covering_element(&self, range: cstree::text::TextRange) -> Option<&SyntaxNode> {
+        let iter = self.root().preorder()
+        .filter_map(|event| match event {
+            cstree::traversal::WalkEvent::Enter(node) => Some(node),
+            cstree::traversal::WalkEvent::Leave(_) => None,
+        });
+    
+        if range.len() == Into::into(0) {
+            let node = self.root().preorder()
+                .filter_map(|event| match event {
+                    cstree::traversal::WalkEvent::Enter(node) => Some(node),
+                    cstree::traversal::WalkEvent::Leave(_) => None,
+                })
+                .skip_while(|node| node.text_range().start() < range.start())
+                .take_while(|node| node.text_range() == range)
+                .last()
+            ;
+            if node.is_some() {
+                return node;
+            }
+        }
+    
+        self.root().preorder()
+        .filter_map(|event| match event {
+            cstree::traversal::WalkEvent::Enter(node) => Some(node),
+            cstree::traversal::WalkEvent::Leave(_) => None,
+        })
+        .take_while(|node| node.text_range().contains_range(range)).last()
+    }
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -91,7 +122,17 @@ pub enum Recovery {
 #[derive(Debug, Clone)]
 pub struct Annotation {
     pub node_type: NodeType,
+    pub state: usize,
     pub recovery: Option<Recovery>,
+}
+
+impl Annotation {
+    pub fn is_node(&self) -> bool {
+        match self.node_type {
+            NodeType::TokenSet | NodeType::Node | NodeType::Error => true,
+            NodeType::LeadingToken | NodeType::TrailingToken | NodeType::MainToken => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

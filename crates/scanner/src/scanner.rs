@@ -11,10 +11,10 @@ pub struct Scanner<'a> {
 }
 
 impl<'a> Scanner<'a> {
-    pub fn create(source: &'a str) -> Result<Self, anyhow::Error> {
+    pub fn create(source: &'a str, index_from: usize) -> Result<Self, anyhow::Error> {
         let mut this = Self {
             source,
-            index: 0,
+            index: index_from,
             lookahead: None,
         };
         this.shift();
