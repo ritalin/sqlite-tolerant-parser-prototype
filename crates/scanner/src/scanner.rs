@@ -130,24 +130,35 @@ fn scan_main(source: &str, index: usize, extra_scanners: &[usize]) -> Option<(us
     }
 
     if let Some(sub_source) = source.get(index..) {
-        match engine::scan_by_lexme_rule(sub_source) {
-            Some(item) => {
-                let tag = SyntaxKind::from_raw(cstree::RawSyntaxKind(item.id));
-                let item = TokenItem { 
-                    tag, 
-                    offset: index,
-                    len: item.len, 
-                    value: Some(item.pattern.to_string())
-                };
-                return Some((item.offset + item.len, item));
+        let item1 = engine::scan_by_lexme_rule(sub_source).and_then(|item| {
+            let tag = SyntaxKind::from_raw(cstree::RawSyntaxKind(item.id));
+            let item = TokenItem { 
+                tag, 
+                offset: index,
+                len: item.len, 
+                value: Some(item.pattern.to_string())
+            };
+            Some((item.offset + item.len, item))
+        });
+        let item2 = {
+            let mut items = vec![];
+            let scanners = engine::regex_scan_patterns(extra_scanners);
+            scan_extra_internal(source, index, &scanners, &mut items).and_then(|next_index| {
+                items.first().map(|item| (next_index, item.clone()))
+            })
+        };
+
+        match (item1.as_ref(), item2.as_ref()) {
+            (Some((_, token1)), Some((_, token2))) => {
+                return if token1.len < token2.len { item2 } else { item1 };
             }
-            None => {
-                let mut items = vec![];
-                let scanners = engine::regex_scan_patterns(extra_scanners);
-                
-                if let Some(next_index) = scan_extra_internal(source, index, &scanners, &mut items) {
-                    return items.first().map(|item| (next_index, item.clone()));
-                }
+            (Some(_), None) => {
+                return item1;
+            }
+            (None, Some(_)) => {
+                return item2;
+            }
+            (None, None) => {
             }
         }
     }
