@@ -1137,10 +1137,6 @@ impl IncrementalParser {
         };
         let kind = SyntaxKind::from_raw(new_node.kind());
 
-        eprintln!("<<<\n----------");
-        eprintln!("{:?}", node_annotations);
-        eprintln!("<<<\n----------");
-
         let mut children = parent.green().children()
             .map(|node| match node {
                 NodeOrToken::Node(x) => NodeElement::Node(x.clone()),
@@ -1181,32 +1177,42 @@ impl IncrementalParser {
 }
 
 fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<SyntaxKind>> {
-    let lower_at = TextSize::new(edit.offset.saturating_sub(1));
-    let upper_at = TextSize::new(edit.offset.saturating_add(edit.from_len).saturating_add(1));
+    let lower_at = TextSize::from(edit.offset);
+    let upper_at = TextSize::from(edit.offset.saturating_add(edit.from_len));
 
-    let candidates = tree.root().preorder()
-        .filter_map(|event| match event {
-            cstree::traversal::WalkEvent::Enter(node) => Some(node),
-            cstree::traversal::WalkEvent::Leave(_) => None,
-        })
-        .skip_while(|node| node.text_range().start() < TextSize::from(lower_at))
-        .take_while(|node| node.text_range().start() < TextSize::from(upper_at))
-        .collect::<Vec<_>>()
-    ;
+    let Some(lower_node) = contains_last_token(tree.root(), lower_at) else { return None; };
+    let Some(upper_node) = contains_last_token(tree.root(), upper_at) else { return None; };
 
-    let lower_path = std::iter::successors(candidates.first().cloned(), |&node| node.parent()).collect::<Vec<_>>().into_iter();
-    let upper_path = std::iter::successors(candidates.last().cloned(), |node| node.parent()).collect::<Vec<_>>().into_iter();
-
+    let lower_path = lower_node.prev_token().unwrap_or(lower_node).ancestors().collect::<Vec<_>>().into_iter().rev();
+    let upper_path = upper_node.next_token().unwrap_or(upper_node).ancestors().collect::<Vec<_>>().into_iter().rev();
+    
     let mut common_parent = None;
-
-    for (lower, upper) in lower_path.rev().zip(upper_path.rev()) {
+    
+    for (lower, upper) in lower_path.zip(upper_path) {
         if lower != upper { break }
-        common_parent = Some(lower.syntax(),);
+        common_parent = Some(lower);
     }
 
     // FIXME: range over statements
 
     common_parent.cloned()
+}
+
+fn contains_last_token(root: &SyntaxNode<SyntaxKind>, needle: TextSize) -> Option<&SyntaxToken<SyntaxKind>> {
+    let mut element = root;
+
+    while let Some(child) = element.children_with_tokens().find(|x| x.text_range().contains(needle)) {
+        match child {
+            NodeOrToken::Node(node) => {
+                element = node;
+            }
+            NodeOrToken::Token(token) => {
+                return Some(token);
+            }
+        }
+    }
+    
+    None
 }
 
 fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, terminate_kind: SyntaxKind, node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>, language: &Language) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {

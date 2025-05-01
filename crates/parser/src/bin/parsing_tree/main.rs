@@ -160,10 +160,18 @@ mod parser_tests {
         let tree0 = parser.parse(source0)?;
 
         // dump_tree(&tree0);
+        // eprintln!("[DEBUG] pre-orders: {:?}", 
+        //     tree0.root().preorder_with_tokens()
+        //     .filter_map(|event| match event {
+        //         cstree::traversal::WalkEvent::Enter(node) => Some(node),
+        //         cstree::traversal::WalkEvent::Leave(_) => None,
+        //     })
+        //     .map(|node| (node.kind().text, node.text_range())).collect::<Vec<_>>()
+        // );
 
         let source = "SELECT 123 FROM foo;";
         let inc_parser = parser.incremental(&tree0, 
-            parser::EditScope { offset: 7, from_len: 7, to_len: 10 }
+            parser::EditScope { offset: 7, from_len: 0, to_len: 3 }
         )?;
         let tree = inc_parser.parse(source)?;
 
@@ -195,6 +203,25 @@ mod parser_tests {
     }
 
     #[test]
+    fn test_incremental_parse_dropping() -> Result<(), anyhow::Error> {
+        let source0 = "SELECT * FROM foo;";
+        let parser = Parser::new();
+        let tree0 = parser.parse(source0)?;
+
+        // dump_tree(&tree0);
+
+        let source = "SELECT  FROM foo;";
+        let inc_parser = parser.incremental(&tree0, 
+            parser::EditScope { offset: 7, from_len: 1, to_len: 0 }
+        )?;
+        let tree = inc_parser.parse(source)?;
+
+        dump_tree(&tree);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_incremental_parse_breaking() -> Result<(), anyhow::Error> {
         let source0 = "SELECT 123 FROM foo;";
         let parser = Parser::new();
@@ -204,10 +231,11 @@ mod parser_tests {
 
         let source = "SELECT 123 FROMbar foo;";
         let inc_parser = parser.incremental(&tree0, 
-            parser::EditScope { offset: 15, from_len: 0, to_len: 3 }, 
+            parser::EditScope { offset: 11, from_len: 4, to_len: 7 }, 
         )?;
         let tree = inc_parser.parse(source)?;
 
+        dump_tree(&tree);
         Ok(())
     }
 }
