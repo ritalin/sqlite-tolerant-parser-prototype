@@ -1,4 +1,4 @@
-use std::{env::Args, ffi::{CStr, CString}, mem::MaybeUninit};
+use std::{alloc::{alloc, Layout}, env::Args, ffi::{CStr, CString}, mem::MaybeUninit, ptr::null_mut};
 use crate::{Precedence, Term};
 
 use super::lemon_binding;
@@ -60,10 +60,15 @@ impl Lemon {
     pub fn parse(&mut self) {
         unsafe { 
             lemon_binding::Symbol_init();
-            lemon_binding::Symbol_new(CString::new("$").unwrap().as_ptr());
+            // lemon_binding::Symbol_new(CString::new("$").unwrap().as_ptr());
             lemon_binding::Parse(&mut self.inner);
         
-            lemon_binding::Symbol_new(CString::new("{default}").unwrap().as_ptr());
+            // lemon_binding::Symbol_new(CString::new("{default}").unwrap().as_ptr());
+            let sym_eof = lemon_binding::Symbol_new(CString::new("EOF").unwrap().as_ptr());
+            // lemon_binding::Symbol_new(CString::new("program").unwrap().as_ptr());
+
+            let start_rule = rule_raw_by_name(&mut self.inner, "input");
+            expand_rhs_symbol(start_rule, &[sym_eof]);
 
             self.inner.nsymbol = lemon_binding::Symbol_count();
             self.inner.symbols = lemon_binding::Symbol_arrayof();
@@ -72,6 +77,42 @@ impl Lemon {
 
     pub fn dump(&mut self) {
         unsafe { lemon_binding::ReportOutput(&mut self.inner) }; 
+    }
+}
+
+unsafe fn rule_raw_by_name(lemon: *mut lemon_binding::lemon, needle: &str) -> *mut lemon_binding::rule {
+    unsafe {
+        let mut rule = (*lemon).rule;
+
+        while ! rule.is_null() {
+            let lhs = Rule::name_from(rule);
+            if lhs == needle {
+                return rule;
+            }
+            rule = (*rule).next;
+        }
+
+        null_mut()
+    }
+}
+
+unsafe fn expand_rhs_symbol(rule: *mut lemon_binding::rule, symbols: &[*mut lemon_binding::symbol]) {
+    unsafe {
+        let new_size = ((*rule).nrhs as usize) + symbols.len();
+
+        let new_layout = Layout::array::<*mut lemon_binding::symbol>(new_size).expect("New layout failed");
+
+        let new_rules = alloc(new_layout) as *mut *mut lemon_binding::symbol;
+
+        let offset = (*rule).nrhs as usize;
+        for i in 0..offset {
+            *new_rules.add(i) = *(*rule).rhs.add(i);
+        }
+        for i in 0..symbols.len() {
+            *new_rules.add(i + offset) = symbols[i];
+        }
+        (*rule).rhs = new_rules;
+        (*rule).nrhs = new_size as i32;
     }
 }
 
@@ -161,9 +202,14 @@ impl Symbol {
     }
 
     pub fn name(&self) -> String {
-        unsafe { CStr::from_ptr((*self.inner).name)
-        .to_string_lossy()
-        .to_string() }
+        Symbol::symbol_name(self.inner)
+    }
+
+    pub fn symbol_name(symbol: *mut lemon_binding::symbol) -> String {
+        unsafe { CStr::from_ptr((*symbol).name)
+            .to_string_lossy()
+            .to_string() 
+        } 
     }
 
     pub fn symbol_type(&self) -> SymbolType {
