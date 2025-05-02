@@ -153,6 +153,23 @@ impl StateStack {
     }
 }
 
+struct RecoveryPenalty {
+    delete_slot: usize,
+    shift_limit: usize,
+    shift_decay: usize,
+    next_shift_decay: usize,
+}
+
+impl RecoveryPenalty {
+    pub fn accept_delete(&mut self, used_slot: usize) {
+        self.delete_slot -= used_slot;
+    }
+    pub fn accept_shift(&mut self) {
+        self.shift_decay = self.next_shift_decay;
+        self.next_shift_decay <<= 1;
+    }
+}
+
 thread_local! {
     static ID_GENERATOR: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 }
@@ -188,6 +205,12 @@ impl Parser {
         let root_kind = syntax_kind::r#program;
         let root_member_kind = syntax_kind::r#ecmd;
         let mut root_members = vec![];
+        let mut penalty = RecoveryPenalty { 
+            delete_slot: 3, 
+            shift_limit: 9,
+            shift_decay: 0, 
+            next_shift_decay: 2, 
+        };
 
         while let Some(lookahead) = scanner.lookahead() {
             if lookahead.main.tag == syntax_kind::r#EOF {
@@ -199,7 +222,7 @@ impl Parser {
                 break;
             }
 
-            match parse_internal(&mut scanner, &mut state_stack, &mut element_stack, &mut node_annotations, &mut cache, &self.language)? {
+            match parse_internal(&mut scanner, &mut state_stack, &mut element_stack, &mut node_annotations, &mut cache, &mut penalty, &self.language)? {
                 NodeGenerated::Node(Some((_, element))) => {
                     element_stack.push(Some(element));
                 }
@@ -217,26 +240,6 @@ impl Parser {
                     element_stack.clear();
                 }
                 _ => {}
-                // NodeGenerated::Error { error, recovered } => {
-                //     error_nodes.push(error);
-
-                //     match *recovered {
-                //         Some(NodeGenerated::Node(element)) => {
-                //             element_stack.push(element);
-                //         }
-                //         Some(NodeGenerated::Root(root)) => {
-                //             let tree = create_syntax_tree(root, intern_cache, node_annotations, &resolve_rules, &self.language);
-                //             return Ok(tree);        
-                //         }
-                //         Some(NodeGenerated::RootMember(element)) => {
-                //             root_members.push(element);
-
-                //             state_stack.clear();
-                //             element_stack.clear();
-                //         }
-                //         _ => {}
-                //     }
-                // }
             }
         }
 
@@ -269,6 +272,7 @@ fn parse_internal(
     element_stack: &mut Vec<Option<NodeElementOrError>>,
     node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
     cache: &mut NodeCache<InternCache>,
+    penalty: &mut RecoveryPenalty,
     language: &Language) -> Result<NodeGenerated, anyhow::Error> 
 {
     let root_member_kind = syntax_kind::r#ecmd;
@@ -317,26 +321,30 @@ fn parse_internal(
         }
         TransitionEvent::Error { failed_state, .. } => {
             eprintln!("(start recovery) --------------------------------------------------------------------------------");
-            let delete_candidate = try_state_recovery_by_drop(scanner, state_stack, failed_state, language);
-            let shift_candidate = try_state_recovery_by_shift(scanner, state_stack, failed_state, language)?;
+            let delete_candidate = try_state_recovery_by_drop(scanner, state_stack, failed_state, penalty, language)?;
+            let shift_candidate = try_state_recovery_by_shift(scanner, state_stack, failed_state, penalty, language)?;
 
             let recovered = match (delete_candidate, shift_candidate) {
-                (Some(delete_journal), Some((_, shift_journal))) if delete_journal.score() > shift_journal.score() => {
+                (Some((error_journal, delete_journal)), Some((_, shift_journal))) if delete_journal.score() > shift_journal.score() => {
+                    penalty.accept_delete(error_journal.events.len());
                     // Won by delete
                     eprintln!("Won by delete#1");
-                    replay_delete_recovery(failed_state, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
+                    replay_delete_recovery(&error_journal.events, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
                 (Some(_), Some((error_journal, shift_journal))) => {
+                    penalty.accept_shift();
                     // Won by shift
                     eprintln!("Won by shift#1");
                     replay_shift_recovery(&error_journal.events, &shift_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
-                (Some(delete_journal), None) => {
+                (Some((error_journal, delete_journal)), None) => {
+                    penalty.accept_delete(error_journal.events.len());
                     // Won by delete
                     eprintln!("Won by delete#2");
-                    replay_delete_recovery(failed_state, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
+                    replay_delete_recovery(&error_journal.events, &delete_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
                 (None, Some((error_journal, shift_journal))) => {
+                    penalty.accept_shift();
                     // Won by shift
                     eprintln!("Won by shift#2");
                     replay_shift_recovery(&error_journal.events, &shift_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
@@ -668,7 +676,7 @@ fn create_fatal_error_node() -> Result<NodeElement, anyhow::Error> {
 }
 
 fn replay_delete_recovery(
-    failed_state: usize,
+    error_events: &[TransitionEvent],
     events: &[TransitionEvent], 
     scanner: &mut Scanner, 
     state_stack: &mut StateStack, 
@@ -676,8 +684,10 @@ fn replay_delete_recovery(
     node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, 
     cache: &mut NodeCache<InternCache>) -> Result<Option<NodeGenerated>, anyhow::Error> 
 {
-    let error = create_drop_error_node(scanner.shift(), failed_state, cache, node_annotations)?;
-    element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
+    for event in error_events {
+        let error = create_drop_error_node(scanner.shift(), event.current_state(), cache, node_annotations)?;
+        element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
+    }
 
     let result =replay_translation_event(events, NodeType::TokenSet, None, scanner, state_stack, element_stack, node_annotations, cache)?;
     if result.is_some() {
@@ -871,17 +881,34 @@ impl Journal {
     }
 }
 
-fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &StateStack, _failed_state: usize, language: &Language) -> Option<Journal> {
+fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &StateStack, failed_state: usize, penalty: &RecoveryPenalty, language: &Language) -> Result<Option<(Journal, Journal)>, anyhow::Error> {
+    if penalty.delete_slot == 0 { return Ok(None); }
+
     let scope = scanner.scope();
     // drop lookahead
-    scanner.shift();
+    let mut error_events = vec![];
 
-    let journal = try_state_recovery_internal(scanner, state_stack, language)
-        .map(|events| Journal { events, recovery: Recovery::Delete })
+    while let Some(lookahead) = scanner.shift() {
+        let mut state_stack = state_stack.clone();
+        
+        match parse_state(Some(&lookahead.main.tag), failed_state, &mut state_stack, language, false)? {
+            TransitionEvent::Error { .. } => {
+                error_events.push(TransitionEvent::Shift { syntax_kind: lookahead.main.tag, current_state: failed_state, next_state: failed_state })
+            }
+            _ => { break },
+        }
+        if error_events.len() == penalty.delete_slot { return Ok(None); }
+    }
+
+    let journals = try_state_recovery_internal(scanner, &state_stack, language)
+        .map(|events| {(
+            Journal { events: error_events, recovery: Recovery::Delete },
+            Journal { events, recovery: Recovery::Delete }
+        )})
     ;
     scanner.revert(scope);
     
-    journal
+    Ok(journals)
 }
 
 #[derive(Clone)]
@@ -894,14 +921,13 @@ struct ShiftRecoveryItem {
     event: TransitionEvent,
 }
 
-fn try_state_recovery_by_shift(scanner: &mut Scanner, state_stack: &StateStack, failed_state: usize, language: &Language) -> Result<Option<(Journal, Journal)>, anyhow::Error> {
+fn try_state_recovery_by_shift(scanner: &mut Scanner, state_stack: &StateStack, failed_state: usize, penalty: &RecoveryPenalty, language: &Language) -> Result<Option<(Journal, Journal)>, anyhow::Error> {
     let scope = scanner.scope();
 
-    let max_depth = 9;
     let state_stack = state_stack.clone();
-    let histories = fetch_shift_candidates(&state_stack, failed_state, None, 0, max_depth, language);
+    let histories = fetch_shift_candidates(&state_stack, failed_state, None, 0, penalty.shift_limit, language);
 
-    let Some((error_journal, journal)) = try_state_recovery_by_shift_internal_ph1(histories, scanner, language, max_depth)? else {
+    let Some((error_journal, journal)) = try_state_recovery_by_shift_internal_ph1(histories, scanner, language, penalty.shift_limit - penalty.shift_decay)? else {
         scanner.revert(scope);
         return Ok(None);
     };
@@ -1129,7 +1155,14 @@ impl IncrementalParser {
         let mut cache = NodeCache::with_interner(&mut intern_cache);
         let mut node_annotations = HashMap::new();
 
-        let Some((id, new_node)) = incremental_parse(&mut scanner, &mut state_stack, self.edit_node.kind(), &mut node_annotations, &mut cache, &self.tree.language)? else {
+        let mut penalty = RecoveryPenalty { 
+            delete_slot: 3, 
+            shift_limit: 9,
+            shift_decay: 0, 
+            next_shift_decay: 2, 
+        };
+
+        let Some((id, new_node)) = incremental_parse(&mut scanner, &mut state_stack, self.edit_node.kind(), &mut node_annotations, &mut cache, &mut penalty, &self.tree.language)? else {
             bail!("Parsing incremental failed");
         };
         let Some((_, status)) = node_annotations.get(&id) else {
@@ -1180,8 +1213,8 @@ fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<Synt
     let lower_at = TextSize::from(edit.offset);
     let upper_at = TextSize::from(edit.offset.saturating_add(edit.from_len));
 
-    let Some(lower_node) = contains_last_token(tree.root(), lower_at) else { return None; };
-    let Some(upper_node) = contains_last_token(tree.root(), upper_at) else { return None; };
+    let Some(lower_node) = find_deepest_token_containing(tree.root(), lower_at) else { return None; };
+    let Some(upper_node) = find_deepest_token_containing(tree.root(), upper_at) else { return None; };
 
     let lower_path = lower_node.prev_token().unwrap_or(lower_node).ancestors().collect::<Vec<_>>().into_iter().rev();
     let upper_path = upper_node.next_token().unwrap_or(upper_node).ancestors().collect::<Vec<_>>().into_iter().rev();
@@ -1198,7 +1231,7 @@ fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<Synt
     common_parent.cloned()
 }
 
-fn contains_last_token(root: &SyntaxNode<SyntaxKind>, needle: TextSize) -> Option<&SyntaxToken<SyntaxKind>> {
+fn find_deepest_token_containing(root: &SyntaxNode<SyntaxKind>, needle: TextSize) -> Option<&SyntaxToken<SyntaxKind>> {
     let mut element = root;
 
     while let Some(child) = element.children_with_tokens().find(|x| x.text_range().contains(needle)) {
@@ -1215,11 +1248,11 @@ fn contains_last_token(root: &SyntaxNode<SyntaxKind>, needle: TextSize) -> Optio
     None
 }
 
-fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, terminate_kind: SyntaxKind, node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>, language: &Language) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, terminate_kind: SyntaxKind, node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>, penalty: &mut RecoveryPenalty, language: &Language) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
     let mut element_stack = vec![];
 
     while let Some(_lookahead) = scanner.lookahead() {
-        match parse_internal(scanner, state_stack, &mut element_stack, node_annotations, cache, language)? {
+        match parse_internal(scanner, state_stack, &mut element_stack, node_annotations, cache, penalty, language)? {
             NodeGenerated::Node(Some((kind, element))) if kind == terminate_kind => {
                 return match element {
                     NodeElementOrError::Element { id, element } => {

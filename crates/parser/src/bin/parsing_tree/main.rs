@@ -102,20 +102,17 @@ mod parser_tests {
         let parser = Parser::new();
         let tree = parser.parse(&source)?;
 
-        // dump_tree(&tree);
+        dump_tree(&tree);
 
-        let element = tree.covering_element(TextRange::new(TextSize::new(11), TextSize::new(14)));
+        let element = tree.covering_element(TextRange::new(TextSize::new(11), TextSize::new(17)));
         let Some(node) = element else {
             panic!("Covering element does not exist.");
         };
         
         'error_node: {
-            assert_eq!(Some(syntax_kind::r#DELETE), node.parent().map(|x| x.kind()));
+            assert_eq!(syntax_kind::r#DELETE, node.kind());
 
-            let Some(error_node) = node.parent().map(|x| x.syntax()) else {
-                panic!("Covering error parent element does not exist.");
-            };
-            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node)) else {
+            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(node.syntax())) else {
                 panic!("Node annotation for parent must be assigned.");
             };
             assert_eq!(NodeType::Error, annotation.node_type);
@@ -132,7 +129,7 @@ mod parser_tests {
         let parser = Parser::new();
         let tree = parser.parse(&source)?;
 
-        // dump_tree(&tree);
+        dump_tree(&tree);
 
         let element = tree.covering_element(TextRange::new(TextSize::new(8), TextSize::new(8)));
         let Some(error_node) = element else {

@@ -151,6 +151,15 @@ pub enum TransitionEvent {
 }
 
 impl TransitionEvent {
+    pub fn current_state(&self) -> usize {
+        match self {
+            TransitionEvent::Shift { current_state, .. } => *current_state,
+            TransitionEvent::Reduce { current_state, .. } => *current_state,
+            TransitionEvent::Error { failed_state, .. } => *failed_state,
+            TransitionEvent::Accept { current_state, .. } => *current_state,
+        }
+    }
+
     pub fn next_state(&self) -> Option<usize> {
         match self {
             TransitionEvent::Shift { next_state, .. } => Some(*next_state),

@@ -73,33 +73,61 @@ impl SyntaxTree {
     }
 
     pub fn covering_element(&self, range: cstree::text::TextRange) -> Option<&SyntaxNode> {
-        let iter = self.root().preorder()
-        .filter_map(|event| match event {
-            cstree::traversal::WalkEvent::Enter(node) => Some(node),
-            cstree::traversal::WalkEvent::Leave(_) => None,
-        });
-    
-        if range.len() == Into::into(0) {
-            let node = self.root().preorder()
-                .filter_map(|event| match event {
-                    cstree::traversal::WalkEvent::Enter(node) => Some(node),
-                    cstree::traversal::WalkEvent::Leave(_) => None,
+        let mut element = &self.root;
+
+        loop {
+            let child = element.children_with_tokens()
+                .find(|x| {
+                    match x.text_range() {
+                        child_range if child_range.len() == cstree::text::TextSize::from(0) => child_range.start() == range.start(),
+                        child_range => child_range.contains(range.start())
+                    }
                 })
-                .skip_while(|node| node.text_range().start() < range.start())
-                .take_while(|node| node.text_range() == range)
-                .last()
             ;
-            if node.is_some() {
-                return node;
+
+            match child {
+                Some(NodeOrToken::Token(token)) => {
+                    return Some(token.parent());
+                }
+                Some(NodeOrToken::Node(node)) if node.arity_with_tokens() == 0 => {
+                    return Some(node);
+                }
+                Some(NodeOrToken::Node(node)) => {
+                    element = node;
+                }
+                None => { break }
             }
         }
+        
+        None
+
+    //     let iter = self.root().preorder()
+    //     .filter_map(|event| match event {
+    //         cstree::traversal::WalkEvent::Enter(node) => Some(node),
+    //         cstree::traversal::WalkEvent::Leave(_) => None,
+    //     });
     
-        self.root().preorder()
-        .filter_map(|event| match event {
-            cstree::traversal::WalkEvent::Enter(node) => Some(node),
-            cstree::traversal::WalkEvent::Leave(_) => None,
-        })
-        .take_while(|node| node.text_range().contains_range(range)).last()
+    //     if range.len() == Into::into(0) {
+    //         let node = self.root().preorder()
+    //             .filter_map(|event| match event {
+    //                 cstree::traversal::WalkEvent::Enter(node) => Some(node),
+    //                 cstree::traversal::WalkEvent::Leave(_) => None,
+    //             })
+    //             .skip_while(|node| node.text_range().start() < range.start())
+    //             .take_while(|node| node.text_range() == range)
+    //             .last()
+    //         ;
+    //         if node.is_some() {
+    //             return node;
+    //         }
+    //     }
+    
+    //     self.root().preorder()
+    //     .filter_map(|event| match event {
+    //         cstree::traversal::WalkEvent::Enter(node) => Some(node),
+    //         cstree::traversal::WalkEvent::Leave(_) => None,
+    //     })
+    //     .take_while(|node| node.text_range().contains_range(range)).last()
     }
 }
 
