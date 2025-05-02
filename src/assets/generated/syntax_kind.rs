@@ -325,7 +325,7 @@ use phf::phf_map;
 # [allow (non_upper_case_globals)] pub static r#SPACE : SyntaxKind = SyntaxKind { text : "SPACE" , id : 325u32 , is_keyword : false , is_terminal : true } ;
 # [allow (non_upper_case_globals)] pub static r#COMMENT : SyntaxKind = SyntaxKind { text : "COMMENT" , id : 326u32 , is_keyword : false , is_terminal : true } ;
 # [allow (non_upper_case_globals)] pub static r#ILLEGAL : SyntaxKind = SyntaxKind { text : "ILLEGAL" , id : 327u32 , is_keyword : false , is_terminal : true } ;
-# [allow (non_upper_case_globals)] pub static r#EOF : SyntaxKind = SyntaxKind { text : "" , id : 328u32 , is_keyword : false , is_terminal : true } ;
+# [allow (non_upper_case_globals)] pub static r#EOF : SyntaxKind = SyntaxKind { text : "EOF" , id : 328u32 , is_keyword : false , is_terminal : true } ;
 # [allow (non_upper_case_globals)] pub static r#program : SyntaxKind = SyntaxKind { text : "program" , id : 329u32 , is_keyword : false , is_terminal : false } ;
 pub static SYNTAX_KIND_MAP: phf::Map<u32, SyntaxKind> = phf_map!{
   2u32 => r#input ,

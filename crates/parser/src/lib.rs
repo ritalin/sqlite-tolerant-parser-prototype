@@ -139,6 +139,7 @@ pub enum NodeType {
     MainToken,
     Node,
     Error,
+    FatalError,
 }
 
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -157,7 +158,7 @@ pub struct Annotation {
 impl Annotation {
     pub fn is_node(&self) -> bool {
         match self.node_type {
-            NodeType::TokenSet | NodeType::Node | NodeType::Error => true,
+            NodeType::TokenSet | NodeType::Node | NodeType::Error | NodeType::FatalError => true,
             NodeType::LeadingToken | NodeType::TrailingToken | NodeType::MainToken => false,
         }
     }

@@ -235,4 +235,31 @@ mod parser_tests {
         dump_tree(&tree);
         Ok(())
     }
+
+    #[test]
+    fn test_incremental_parse_fatal() -> Result<(), anyhow::Error> {
+        let source0 = "SELECT 123 123 123 123 FROM foo a;";
+        let parser = Parser::new();
+        let tree = parser.parse(source0)?;
+
+        dump_tree(&tree);
+        Ok(())
+    }
+
+    #[test]
+    fn test_incremental_parse_braking_fatal() -> Result<(), anyhow::Error> {
+        let source0 = "SELECT 123 FROM foo;";
+        let parser = Parser::new();
+        let tree0 = parser.parse(source0)?;
+
+        let source = "SELECT 123 123 123 123 FROM foo a;";
+        let parser = Parser::new();
+        let inc_parser = parser.incremental(&tree0, 
+            parser::EditScope { offset: 11, from_len: 0, to_len: 12 }, 
+        )?;
+        let tree = inc_parser.parse(source)?;
+
+        dump_tree(&tree);
+        Ok(())
+    }
 }

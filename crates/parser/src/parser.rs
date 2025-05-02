@@ -1,7 +1,7 @@
 use std::{collections::HashMap, rc::Rc, time::Instant};
 use anyhow::bail;
 use cactus::Cactus;
-use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, syntax::{SyntaxNode, SyntaxToken}, text::TextSize, util::NodeOrToken, Syntax};
+use cstree::{build::NodeCache, green::{GreenNode, GreenToken}, syntax::{ResolvedNode, SyntaxNode, SyntaxToken}, text::TextSize, util::NodeOrToken, Syntax};
 use scanner::{Scanner, Token, TokenItem};
 use sqlite_parser_proto::{engine::kinds as syntax_kind, LookaheadTransition, SyntaxKind, TransitionEvent};
 use crate::{Annotation, InternCache, Language, NodeElement, NodeType, Recovery, SyntaxTree};
@@ -239,6 +239,9 @@ impl Parser {
                     state_stack.reset();
                     element_stack.clear();
                 }
+                NodeGenerated::Fatal(id, element) => {
+                    root_members.push(Some((id, element)));
+                }
                 _ => {}
             }
         }
@@ -264,6 +267,7 @@ enum NodeGenerated {
     Node(Option<(SyntaxKind, NodeElementOrError)>),
     Root(SyntaxKind, NodeId, GreenNode),
     RootMember(Option<(SyntaxKind, NodeId, NodeElement)>),
+    Fatal(NodeId, NodeElement),
 }
 
 fn parse_internal(
@@ -306,16 +310,20 @@ fn parse_internal(
             let node = create_green_node(kind, current_state, pop_count, element_stack, node_annotations)?;
             Ok(NodeGenerated::Node(node.map(|(id, element)| (kind, NodeElementOrError::into_element(id, element)))))
         }
-        TransitionEvent::Accept { current_state, syntax_kind: kind } if ! element_stack.is_empty() => {
+        TransitionEvent::Accept { current_state: _current_state, syntax_kind: kind } if element_stack.is_empty() => {
+            // For empty source
+            let lookahead = Token { leading: None, main: TokenItem { tag: syntax_kind::r#EOF, offset: 0, len: 0, value: None }, trailing: None };
+            let root_member = create_green_token(lookahead, syntax_kind::r#EOF, 0, cache, node_annotations)?
+                .map(|(id, node)| (kind, id, node))
+            ;
+
+            Ok(NodeGenerated::RootMember(root_member))
+        }
+        TransitionEvent::Accept { current_state, syntax_kind: kind } => {
             let root = create_green_node(kind, current_state, element_stack.len(), element_stack, node_annotations)?
                 .and_then(|(_, element)| NodeElement::into_node(element))
                 .unwrap()
             ;
-
-            Ok(NodeGenerated::Root(kind, next_node_id(), root))
-        }
-        TransitionEvent::Accept { current_state: _current_state, syntax_kind: kind } => {
-            let root = create_fatal_error_node()?.into_node().unwrap();
 
             Ok(NodeGenerated::Root(kind, next_node_id(), root))
         }
@@ -350,32 +358,14 @@ fn parse_internal(
                     replay_shift_recovery(&error_journal.events, &shift_journal.events, scanner, state_stack, element_stack, node_annotations, cache)?
                 }
                 (None, None) => {
-                    // FIXME: Fatal Error
-                    todo!("Fatal Error recover failed (Not implemented)");
+                    // Fatal Error
+                    eprintln!("calcel recovery");
+                    let kind = syntax_kind::r#ILLEGAL;
+                    let (id, node) = create_fatal_error_node(scanner, kind, failed_state, element_stack, cache, node_annotations)?;
+                    Some(NodeGenerated::Fatal(id, node))
                 }
             };
 
-            // let recovered = match journals.into_iter().max_by(|lhs, rhs| lhs.events.len().cmp(&rhs.events.len())) {
-            //     Some(Journal{ recovery, events }) if recovery == Recovery::Delete => {
-            //         let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
-            //         let error = create_drop_error_node(scanner.shift(), failed_state, next_state, cache, node_annotations)?;
-            //         element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
-
-            //         replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
-            //     }
-            //     Some(Journal{ events, .. }) => {
-            //         let token_offset = lookahead.map(|token| token.offset_start()).unwrap_or_default();
-            //         let next_state = events.iter().filter_map(|event| event.next_state()).next().unwrap_or_default();
-            //         let error = create_blank_error_node(token_offset, failed_state, next_state, node_annotations)?;
-            //         element_stack.push(error.map(|(id, element)| NodeElementOrError::into_error(id, element)));
-
-            //         replay_translation_event(&events, scanner, state_stack, element_stack, node_annotations, cache)?
-            //     }
-            //     None => {
-            //         // FIXME: FatalError
-            //         todo!("Fatal Error recover failed (Not implemented)");
-            //     }
-            // };
             eprintln!("(finish recovery) --------------------------------------------------------------------------------");
 
             match recovered {
@@ -682,13 +672,59 @@ fn create_blank_error_node(lookahead_offset: usize, current_state: usize, cache:
     }
 }
 
-fn create_fatal_error_node() -> Result<NodeElement, anyhow::Error> {
-    use cstree::Syntax;
+fn create_fatal_error_node(scanner: &mut Scanner, kind: SyntaxKind, state: usize, element_stack: &mut Vec<Option<NodeElementOrError>>, cache: &mut NodeCache<InternCache>, annotation_map: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<(NodeId, NodeElement), anyhow::Error> {
+    let (mut offset, mut len) = element_stack.iter()
+        .filter_map(|x| match x {
+            Some(NodeElementOrError::Element { id, .. }) | Some(NodeElementOrError::Error { id, .. }) => annotation_map.get(id),
+            None => None,
+        })
+        .fold((usize::MAX, 0), |(acc_offset, acc_len), (_, status)| {
+            (usize::min(status.range_from, acc_offset), acc_len + status.len)
+        })
+    ;
 
-    let kind = syntax_kind::r#ILLEGAL;
-    let node = cstree::green::GreenNode::new(kind.into_raw(), vec![]);
+    let mut children = element_stack.drain(..)
+        .filter_map(|x| match x {
+            Some(NodeElementOrError::Element { element, .. }) | Some(NodeElementOrError::Error { element, .. }) => Some(element),
+            None => None,
+        })
+        .collect::<Vec<_>>()
+    ;
+    while let Some(lookahead) = scanner.shift() {
+        offset = usize::min(lookahead.offset_start(), offset);
+        len += lookahead.token_len();
 
-    Ok(NodeElement::Node(node))
+        if let Some(child) = create_green_token_items(&lookahead, kind, state, cache, annotation_map)? {
+            let annotation = Annotation { node_type: NodeType::Error, state, recovery: None };
+            let status = AnnotationStatus{ 
+                kind,
+                range_from: lookahead.offset_start(), 
+                len: lookahead.token_len(), 
+            };
+
+            let id = next_node_id();
+            annotation_map.insert(id, (annotation, status));
+
+            children.push(child);
+        }
+        if lookahead.main.tag == syntax_kind::SEMI { break }
+    }
+
+    let (id, node) = create_fatal_error_node_internal(children, kind, offset, len, state, annotation_map);
+
+    Ok((id, node))
+}
+
+fn create_fatal_error_node_internal(children: Vec<NodeOrToken<GreenNode, GreenToken>>, kind: SyntaxKind, offset: usize, len: usize, state: usize, annotation_map: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> (NodeId, NodeElement) {
+    let node = cstree::green::GreenNode::new(kind.into_raw(), children);
+    let id = next_node_id();
+
+    let annotation = Annotation { node_type: crate::NodeType::FatalError, state, recovery: None };
+    let staus = AnnotationStatus{ kind, range_from: offset, len };
+
+    annotation_map.insert(id, (annotation, staus));
+
+    (id, NodeElement::Node(node))
 }
 
 fn replay_delete_recovery(
@@ -913,7 +949,10 @@ fn try_state_recovery_by_drop(scanner: &mut Scanner, state_stack: &StateStack, f
             }
             _ => { break },
         }
-        if error_events.len() == penalty.delete_slot { return Ok(None); }
+        if error_events.len() == penalty.delete_slot { 
+            scanner.revert(scope);
+            return Ok(None); 
+        }
     }
 
     let journals = try_state_recovery_internal(scanner, &state_stack, language)
@@ -1132,6 +1171,11 @@ pub struct EditScope {
     pub to_len: u32,
 }
 
+enum IncrementalNodeGenerated {
+    Success { id: NodeId, node: NodeElement },
+    FatalError { id: NodeId, node: NodeElement },
+}
+
 pub struct IncrementalParser {
     tree: SyntaxTree,
     edit_node: SyntaxNode<SyntaxKind>,
@@ -1158,12 +1202,6 @@ impl IncrementalParser {
         let Some(metadata) = self.tree.get_annotation_of(AnnotationKey::from(&self.edit_node)) else {
             bail!("Invalid state of edit node (kind: {})", self.edit_node.kind().text);
         };
-        let Some(parent) = self.edit_node.parent() else {
-            bail!("Need parent for edit node (kind: {})", self.edit_node.kind().text);
-        };
-        let Some(index) = parent.children().enumerate().filter(|(_, node)| **node == self.edit_node).map(|(i, _)| i).next() else {
-            bail!("Can not determine edit node index (kind: {})", self.edit_node.kind().text);
-        };
 
         let mut state_stack = StateStack::new(metadata.state);
         let mut scanner = Scanner::create(source, self.edit_node.text_range().start().into())?;
@@ -1178,51 +1216,78 @@ impl IncrementalParser {
             next_shift_decay: 2, 
         };
 
-        let Some((id, new_node)) = incremental_parse(&mut scanner, &mut state_stack, self.edit_node.kind(), &mut node_annotations, &mut cache, &mut penalty, &self.tree.language)? else {
-            bail!("Parsing incremental failed");
+        let (red_node, new_annotations) = match incremental_parse(&mut scanner, &mut state_stack, self.edit_node.kind(), &mut node_annotations, &mut cache, &mut penalty, &self.tree.language)? {
+            IncrementalNodeGenerated::Success { id, node: new_node } => {
+                let Some(parent) = self.edit_node.parent() else {
+                    bail!("Need parent for edit node (kind: {})", self.edit_node.kind().text);
+                };
+                let Some(index) = parent.children().enumerate().find(|(_, node)| **node == self.edit_node).map(|(i, _)| i) else {
+                    bail!("Can not determine edit node index (kind: {})", self.edit_node.kind().text);
+                };
+                replace_generated_node(id, new_node, index, &self.edit_node, parent, &intern_cache, &self.tree.annotations, &mut node_annotations)?
+
+            }
+            IncrementalNodeGenerated::FatalError { id, node: new_node } => {
+                let Some((index, anscestor)) = self.edit_node.root().children().enumerate().find(|(_, child)| self.edit_node.ancestors().any(|x| x == *child)) else {
+                    bail!("Need anscestor node of root (kind: {})", self.edit_node.kind().text);
+                };
+                replace_generated_node(id, new_node, index, &anscestor, anscestor.root(), &intern_cache, &self.tree.annotations, &mut node_annotations)?
+            }
         };
-        let Some((_, status)) = node_annotations.get(&id) else {
-            bail!("Annotation ust be created");
-        };
-        let kind = SyntaxKind::from_raw(new_node.kind());
-
-        let mut children = parent.green().children()
-            .map(|node| match node {
-                NodeOrToken::Node(x) => NodeElement::Node(x.clone()),
-                NodeOrToken::Token(x) => NodeElement::Token(x.clone()),
-            }).collect::<Vec<_>>()
-        ;
-
-        children.splice(index..=index, vec![new_node.clone()]);
-        let new_parent = GreenNode::new(parent.syntax_kind(), children);
-
-        let new_root = parent.replace_with(new_parent);
-        let red_node = SyntaxNode::new_root_with_resolver(new_root, intern_cache.clone());
-
-        let merge_set_before = partition_node_id_with_dirty(&self.tree.root(), AnnotationKey::from(&self.edit_node), NodeMergeSet::as_merge_set);
-        let key = AnnotationKey { kind, offset: status.range_from, len: status.len,is_node: true };
-        let merge_set_after = partition_node_id_with_dirty(red_node.syntax(), key, NodeMergeSet::as_merge_set);
-
-        let mut new_annotations = merge_set_before.into_iter().zip(merge_set_after)
-            .filter_map(|(before, after)| match (before, after) {
-                (NodeMergeSet::Unmodified(old_key), NodeMergeSet::Unmodified(new_key)) => {
-                    let Some((id, annotation)) = self.tree.annotations.get(&old_key) else { return None; };
-                    Some((new_key.clone(), (id.clone(), annotation.clone())))
-                }
-                _ => None,
-            })
-            .collect::<HashMap<_, _>>()
-        ;
-        new_annotations.extend(
-            node_annotations.into_iter()
-            .map(|(id, (annotation, status))| (
-                AnnotationKey { kind: status.kind, offset: status.range_from, len: status.len, is_node: annotation.is_node() },
-                (id, annotation)
-            ))
-        );
 
         Ok(SyntaxTree{ root: red_node, intern_cache, annotations: new_annotations, ..self.tree.clone() })
     }
+}
+
+fn replace_generated_node(
+    id: NodeId, new_node: NodeElement, index: usize, 
+    old_node: &SyntaxNode<SyntaxKind>,
+    parent: &SyntaxNode<SyntaxKind>, 
+    intern_cache: &InternCache,
+    old_annotations: &HashMap<AnnotationKey, ((Instant, u64), Annotation)>,
+    node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<(ResolvedNode<SyntaxKind>, HashMap<AnnotationKey, ((Instant, u64), Annotation)>), anyhow::Error> 
+{
+    let Some((_, status)) = node_annotations.get(&id) else {
+        bail!("Annotation ust be created");
+    };
+    let kind = SyntaxKind::from_raw(new_node.kind());
+          
+    let mut children = parent.green().children()
+        .map(|node| match node {
+            NodeOrToken::Node(x) => NodeElement::Node(x.clone()),
+            NodeOrToken::Token(x) => NodeElement::Token(x.clone()),
+        }).collect::<Vec<_>>()
+    ;
+
+    children.splice(index..=index, vec![new_node.clone()]);
+    let new_parent = GreenNode::new(parent.syntax_kind(), children);
+
+    let new_root = parent.replace_with(new_parent);
+    let red_node = SyntaxNode::new_root_with_resolver(new_root, intern_cache.clone());
+
+    let merge_set_before = partition_node_id_with_dirty(&parent.root(), AnnotationKey::from(old_node), NodeMergeSet::as_merge_set);
+    let key = AnnotationKey { kind, offset: status.range_from, len: status.len,is_node: true };
+    let merge_set_after = partition_node_id_with_dirty(red_node.syntax(), key, NodeMergeSet::as_merge_set);
+
+    let mut new_annotations = merge_set_before.into_iter().zip(merge_set_after)
+        .filter_map(|(before, after)| match (before, after) {
+            (NodeMergeSet::Unmodified(old_key), NodeMergeSet::Unmodified(new_key)) => {
+                let Some((id, annotation)) = old_annotations.get(&old_key) else { return None; };
+                Some((new_key.clone(), (id.clone(), annotation.clone())))
+            }
+            _ => None,
+        })
+        .collect::<HashMap<_, _>>()
+    ;
+    new_annotations.extend(
+        node_annotations.into_iter()
+        .map(|(id, (annotation, status))| (
+            AnnotationKey { kind: status.kind, offset: status.range_from, len: status.len, is_node: annotation.is_node() },
+            (id.clone(), annotation.clone())
+        ))
+    );
+
+    Ok((red_node, new_annotations))
 }
 
 fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<SyntaxKind>> {
@@ -1274,7 +1339,7 @@ fn find_deepest_token_containing(root: &SyntaxNode<SyntaxKind>, needle: TextSize
     None
 }
 
-fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, terminate_kind: SyntaxKind, node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>, penalty: &mut RecoveryPenalty, language: &Language) -> Result<Option<(NodeId, NodeElement)>, anyhow::Error> {
+fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, terminate_kind: SyntaxKind, node_annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>, cache: &mut NodeCache<InternCache>, penalty: &mut RecoveryPenalty, language: &Language) -> Result<IncrementalNodeGenerated, anyhow::Error> {
     let mut element_stack = vec![];
 
     while let Some(_lookahead) = scanner.lookahead() {
@@ -1282,10 +1347,10 @@ fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, termin
             NodeGenerated::Node(Some((kind, element))) if kind == terminate_kind => {
                 return match element {
                     NodeElementOrError::Element { id, element } => {
-                        Ok(Some((id, element)))
+                        Ok(IncrementalNodeGenerated::Success {id, node: element })
                     }
                     NodeElementOrError::Error { id, element } => {
-                        Ok(Some((id, element)))
+                        Ok(IncrementalNodeGenerated::Success {id, node: element })
                     }
                 };
             }
@@ -1296,16 +1361,38 @@ fn incremental_parse(scanner: &mut Scanner, state_stack: &mut StateStack, termin
                 element_stack.push(None);
             }
             NodeGenerated::Root(kind, id, element) if kind == terminate_kind => {
-                return Ok(Some((id, NodeElement::Node(element))));
+                return Ok(IncrementalNodeGenerated::Success {id, node: NodeElement::Node(element) });
             }
             NodeGenerated::RootMember(_) => {
                 todo!()
+            }
+            NodeGenerated::Fatal(id, element) => {
+                return Ok(IncrementalNodeGenerated::FatalError { id, node: element });
             }
             _ => {}
         }
     }
     
-    Ok(None)
+    let (offset, len) = element_stack.iter()
+        .filter_map(|x| match x {
+            Some(NodeElementOrError::Element { id, .. }) | Some(NodeElementOrError::Error { id, .. }) => node_annotations.get(id),
+            None => None,
+        })
+        .fold((usize::MAX, 0), |(acc_offset, acc_len), (_, status)| {
+            (usize::min(status.range_from, acc_offset), acc_len + status.len)
+        })
+    ;
+    let children = element_stack.into_iter()
+        .filter_map(|x| match x {
+            Some(NodeElementOrError::Element { element, .. }) => Some(element),
+            Some(NodeElementOrError::Error { element, .. }) => Some(element),
+            None => None,
+        })
+        .collect::<Vec<_>>()
+    ;
+
+    let (id, fatal_node) = create_fatal_error_node_internal(children, syntax_kind::r#ILLEGAL, offset, len, 0, node_annotations);
+    Ok(IncrementalNodeGenerated::FatalError { id, node: fatal_node })
 }
 
 pub enum NodeMergeSet {
