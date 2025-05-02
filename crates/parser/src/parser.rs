@@ -499,7 +499,7 @@ fn create_green_token_internal(token: &TokenItem, node_type: NodeType, current_s
             builder.static_token(token.tag);
         }
         (false, true) => {
-            let s = token.value.clone().unwrap_or(token.tag.text.to_string());
+            let s = token.value.clone().unwrap_or("".to_string());
             builder.token(token.tag, &s);
         }
         _ => {
@@ -656,14 +656,30 @@ fn create_drop_error_node(lookahead: Option<Token>, state: usize, cache: &mut No
     }
 }
 
-fn create_blank_error_node() -> Result<Option<NodeElement>, anyhow::Error> {
-    use cstree::Syntax;
-
-    // FIXME: need blank token kind
+fn create_blank_error_node(lookahead_offset: usize, current_state: usize, cache: &mut NodeCache<InternCache>, annotations: &mut HashMap<NodeId, (Annotation, AnnotationStatus)>) -> Result<Option<NodeElement>, anyhow::Error> {
+    let brank_token = Token {
+        leading: None,
+        main: TokenItem { tag: syntax_kind::r#SPACE, offset: lookahead_offset, len: 0, value: None },
+        trailing: None,
+    };
     let kind = syntax_kind::r#ILLEGAL;
-    let node = cstree::green::GreenNode::new(kind.into_raw(), vec![]);
 
-    Ok(Some(NodeElement::Node(node)))
+    match create_green_token_items(&brank_token, kind, current_state, cache, annotations)? {
+        Some(node) => {
+            let annotation = Annotation { node_type: NodeType::Error, state: current_state, recovery: Some(Recovery::Shift) };
+            let status = AnnotationStatus{ 
+                kind,
+                range_from: brank_token.offset_start(), 
+                len: brank_token.token_len(), 
+            };
+
+            let id = next_node_id();
+            annotations.insert(id, (annotation, status));
+
+            Ok(Some(node))
+        }
+        None => Ok(None)
+    }
 }
 
 fn create_fatal_error_node() -> Result<NodeElement, anyhow::Error> {
@@ -749,7 +765,7 @@ fn replay_translation_event(
                 let id = match recovery_type {
                     Some(Recovery::Shift) => {
                         let token = scanner.lookahead().unwrap();
-                        create_blank_error_node()?
+                        create_blank_error_node(token.offset_start(), current_state, cache, node_annotations)?
                         .map(|node| {
                             let kind = SyntaxKind::from_raw(node.kind());
                             let annotation = Annotation { node_type: node_type.clone(), state: current_state, recovery: recovery_type.clone() };
@@ -1234,14 +1250,24 @@ fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<Synt
 fn find_deepest_token_containing(root: &SyntaxNode<SyntaxKind>, needle: TextSize) -> Option<&SyntaxToken<SyntaxKind>> {
     let mut element = root;
 
-    while let Some(child) = element.children_with_tokens().find(|x| x.text_range().contains(needle)) {
+    loop {
+        let child = element.children_with_tokens()
+            .find(|x| {
+                match x.text_range() {
+                    child_range if child_range.len() == cstree::text::TextSize::from(0) => child_range.start() == needle,
+                    child_range => child_range.contains(needle)
+                }
+            })
+        ;
+
         match child {
-            NodeOrToken::Node(node) => {
-                element = node;
-            }
-            NodeOrToken::Token(token) => {
+            Some(NodeOrToken::Token(token)) => {
                 return Some(token);
             }
+            Some(NodeOrToken::Node(node)) => {
+                element = node;
+            }
+            None => { break }
         }
     }
     
