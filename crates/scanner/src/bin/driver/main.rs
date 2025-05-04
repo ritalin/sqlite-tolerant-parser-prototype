@@ -11,7 +11,7 @@ pub fn main() -> Result<(), anyhow::Error> {
     )
     "#;
 
-    let mut scanner = scanner::Scanner::create(source, 0)?;
+    let mut scanner = scanner::Scanner::create(source.to_string(), 0);
 
     while let Some(token) = scanner.lookahead() {
         println!("leading : {:?}", token.leading);

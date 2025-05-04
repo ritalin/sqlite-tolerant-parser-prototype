@@ -189,14 +189,14 @@ impl Parser {
         }
     }
 
-    pub fn parse(&self, source: &str) -> Result<SyntaxTree, anyhow::Error> {
+    pub fn parse(&self, source: String) -> Result<SyntaxTree, anyhow::Error> {
         let mut state_stack = StateStack::new(0);
         let mut element_stack: Vec<Option<NodeElementOrError>> = vec![];
         let mut intern_cache = InternCache::new();
         let mut cache = NodeCache::with_interner(&mut intern_cache);
         let mut node_annotations = HashMap::<NodeId, (Annotation, AnnotationStatus)>::new();
 
-        let mut scanner = Scanner::create(source, 0)?;
+        let mut scanner = Scanner::create(source, 0);
 
         let resolve_rules = HashMap::<(SyntaxKind, SyntaxKind), SyntaxKind>::from_iter([
             ((syntax_kind::r#selcollist, syntax_kind::r#STAR), syntax_kind::r#ASTERISK)
@@ -1204,7 +1204,7 @@ impl IncrementalParser {
         };
 
         let mut state_stack = StateStack::new(metadata.state);
-        let mut scanner = Scanner::create(source, self.edit_node.text_range().start().into())?;
+        let mut scanner = Scanner::create(source.to_string(), self.edit_node.text_range().start().into());
         let mut intern_cache = self.tree.intern_cache.clone();
         let mut cache = NodeCache::with_interner(&mut intern_cache);
         let mut node_annotations = HashMap::new();

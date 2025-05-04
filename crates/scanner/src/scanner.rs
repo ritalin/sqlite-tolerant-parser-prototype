@@ -4,21 +4,21 @@ use sqlite_parser_proto::SyntaxKind;
 
 use crate::{Token, TokenItem};
 
-pub struct Scanner<'a> {
-    source: &'a str,
+pub struct Scanner {
+    source: String,
     index: usize,
     lookahead: Option<Token>,
 }
 
-impl<'a> Scanner<'a> {
-    pub fn create(source: &'a str, index_from: usize) -> Result<Self, anyhow::Error> {
+impl Scanner {
+    pub fn create(source: String, index_from: usize) -> Self {
         let mut this = Self {
             source,
             index: index_from,
             lookahead: None,
         };
         this.shift();
-        Ok(this)
+        this
     }
 
     pub fn shift(&mut self) -> Option<Token> {
@@ -37,12 +37,12 @@ impl<'a> Scanner<'a> {
         let mut leading = None;
         let mut trailing = None;
 
-        if let Some((next_index, item)) = scan_extra(self.source, index, engine::support_leading()) {
+        if let Some((next_index, item)) = scan_extra(&self.source, index, engine::support_leading()) {
             index = next_index;
             leading = Some(item);
         }
 
-        let main = match scan_main(self.source, index, engine::support_main()) {
+        let main = match scan_main(&self.source, index, engine::support_main()) {
             Some((next_index, item)) => {
                 index = next_index;
                 item
@@ -53,7 +53,7 @@ impl<'a> Scanner<'a> {
             }
         };        
 
-        if let Some((next_index, item)) = scan_extra(self.source, index, engine::support_trailing()) {
+        if let Some((next_index, item)) = scan_extra(&self.source, index, engine::support_trailing()) {
             index = next_index;
             trailing = Some(item);
         }

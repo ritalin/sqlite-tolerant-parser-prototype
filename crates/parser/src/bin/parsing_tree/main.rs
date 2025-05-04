@@ -21,7 +21,7 @@ pub fn main() -> Result<(), anyhow::Error> {
 
     let parser = Parser::new();
 
-    let tree = parser.parse(&source)?;
+    let tree = parser.parse(source.into())?;
 
     // println!("{}", tree.debug(true));
     dump_tree(&tree);
@@ -85,7 +85,7 @@ mod parser_tests {
     fn test_multiple_statement() -> Result<(), anyhow::Error> {
         let source = "SELECT 123 FROM foo;SELECT 42;";
         let parser = Parser::new();
-        let tree = parser.parse(&source)?;
+        let tree = parser.parse(source.into())?;
 
         // dump_tree(&tree);
 
@@ -100,7 +100,7 @@ mod parser_tests {
     fn test_unmatch_token_query() -> Result<(), anyhow::Error> {
         let source = "SELECT 123 DELETE FROM foo;";
         let parser = Parser::new();
-        let tree = parser.parse(&source)?;
+        let tree = parser.parse(source.into())?;
 
         dump_tree(&tree);
 
@@ -127,7 +127,7 @@ mod parser_tests {
     fn test_brank_token_query() -> Result<(), anyhow::Error> {
         let source = "SELECT  FROM foo;";
         let parser = Parser::new();
-        let tree = parser.parse(&source)?;
+        let tree = parser.parse(source.into())?;
 
         dump_tree(&tree);
 
@@ -154,7 +154,7 @@ mod parser_tests {
     fn test_incremental_parse_repairing() -> Result<(), anyhow::Error> {
         let source0 = "SELECT  FROM foo;";
         let parser = Parser::new();
-        let tree0 = parser.parse(source0)?;
+        let tree0 = parser.parse(source0.into())?;
 
         // dump_tree(&tree0);
         // eprintln!("[DEBUG] pre-orders: {:?}", 
@@ -203,7 +203,7 @@ mod parser_tests {
     fn test_incremental_parse_dropping() -> Result<(), anyhow::Error> {
         let source0 = "SELECT * FROM foo;";
         let parser = Parser::new();
-        let tree0 = parser.parse(source0)?;
+        let tree0 = parser.parse(source0.into())?;
 
         // dump_tree(&tree0);
 
@@ -222,7 +222,7 @@ mod parser_tests {
     fn test_incremental_parse_breaking() -> Result<(), anyhow::Error> {
         let source0 = "SELECT 123 FROM foo;";
         let parser = Parser::new();
-        let tree0 = parser.parse(source0)?;
+        let tree0 = parser.parse(source0.into())?;
 
         // dump_tree(&tree0);
 
@@ -240,7 +240,7 @@ mod parser_tests {
     fn test_incremental_parse_fatal() -> Result<(), anyhow::Error> {
         let source0 = "SELECT 123 123 123 123 FROM foo a;";
         let parser = Parser::new();
-        let tree = parser.parse(source0)?;
+        let tree = parser.parse(source0.into())?;
 
         dump_tree(&tree);
         Ok(())
@@ -250,7 +250,7 @@ mod parser_tests {
     fn test_incremental_parse_braking_fatal() -> Result<(), anyhow::Error> {
         let source0 = "SELECT 123 FROM foo;";
         let parser = Parser::new();
-        let tree0 = parser.parse(source0)?;
+        let tree0 = parser.parse(source0.into())?;
 
         let source = "SELECT 123 123 123 123 FROM foo a;";
         let parser = Parser::new();
