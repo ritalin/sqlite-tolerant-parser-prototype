@@ -1,4 +1,3 @@
-pub mod binding;
 pub mod engine;
 
 #[derive(serde::Deserialize)]
