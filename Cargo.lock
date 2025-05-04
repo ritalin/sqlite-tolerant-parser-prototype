@@ -957,6 +957,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sqlite-parser-proto",
 ]
 
 [[package]]
