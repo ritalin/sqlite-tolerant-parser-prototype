@@ -5,17 +5,10 @@ edition = "2024"
 
 [workspace]
 members = [
+    "tools",
     "crates/generate", 
-    "crates/parser", "crates/scanner",
+    "crates/parser", "crates/scanner", "crates/scanner-wasi",
 ]
-
-[[bin]]
-name = "grammar_converter"
-path = "src/bin/grammar_converter/main.rs"
-
-[[bin]]
-name = "keyword_matcher"
-path = "src/bin/keyword_matcher/main.rs"
 
 [[bin]]
 name = "parsing_state"

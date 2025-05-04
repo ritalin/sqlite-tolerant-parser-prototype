@@ -1,5 +1,5 @@
 use std::ffi::CString;
-use sqlite_parser_proto::binding::lemon::{self, SymbolType};
+use tools::binding::lemon::{self, SymbolType};
 
 pub fn main() {
     let filename = CString::new("submodules/sqlite/src/parse.y").unwrap();

@@ -1,4 +1,4 @@
-use sqlite_parser_proto::binding::lemon::LemonBuilder;
+use tools::binding::lemon::LemonBuilder;
 use std::ffi::CString;
 
 fn main() -> Result<(), anyhow::Error> {

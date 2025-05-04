@@ -36,7 +36,7 @@ fn run_main() -> Result<(), anyhow::Error> {
             // println!("cargo:rerun-if-changed={artifact_dir}/keywordhash.h", );
     }
 
-    let lemon_c = "submodules/sqlite/tool/lemon.c";
+    let lemon_c = "../submodules/sqlite/tool/lemon.c";
     run_build_binding_lib(lemon_c, "lemon");
 
     println!("cargo:rustc-link-search=native={out_dir}");
