@@ -1,5 +1,5 @@
 use std::{alloc::{alloc, Layout}, env::Args, ffi::{CStr, CString}, mem::MaybeUninit, ptr::null_mut};
-use crate::{Precedence, Term};
+use sqlite_parser_proto::{Precedence, Term};
 
 use super::lemon_binding;
 use super::keyword_check::sqlite3_keyword_check;
@@ -293,7 +293,7 @@ impl RuleMember {
         }
     }
 
-    pub fn rhs(&self) -> Vec<crate::Rhs> {
+    pub fn rhs(&self) -> Vec<sqlite_parser_proto::Rhs> {
         let rhs = unsafe { std::slice::from_raw_parts((*self.inner).rhs, (*self.inner).nrhs as usize) };
         let rhs_alias = unsafe { std::slice::from_raw_parts((*self.inner).rhsalias, (*self.inner).nrhs as usize) };
 
@@ -305,7 +305,7 @@ impl RuleMember {
         rhs
     }
 
-    fn rhs_from_raw(symbol: *mut lemon_binding::symbol, alias: *const i8) -> crate::Rhs {
+    fn rhs_from_raw(symbol: *mut lemon_binding::symbol, alias: *const i8) -> sqlite_parser_proto::Rhs {
         let name = unsafe { CStr::from_ptr((*symbol).name) }
             .to_string_lossy()
             .to_string()
@@ -318,11 +318,11 @@ impl RuleMember {
         unsafe { 
             let sym = *symbol;
             if (sym.type_ == 2) && (sym.useCnt == 0)  {
-                return crate::Rhs { token: Term::CharClass { members: Symbol::from_raw(0, symbol).additional_names() }, alias };
+                return sqlite_parser_proto::Rhs { token: Term::CharClass { members: Symbol::from_raw(0, symbol).additional_names() }, alias };
             }
         }
 
-        crate::Rhs { token: Term::Symbol {name}, alias }
+        sqlite_parser_proto::Rhs { token: Term::Symbol {name}, alias }
     }
 
     pub fn precedence(&self) -> Option<Precedence> {
