@@ -1,0 +1,45 @@
+package ritalin:scanner@0.0.1;
+
+interface types {
+    record token {
+        leading: option<list<token-item>>,
+        main: token-item,
+        trailing: option<list<token-item>>,
+    }
+
+    record token-item {
+        kind: syntax-kind,
+        offset: u64,
+        len: u64,
+        value: option<string>,
+    }
+
+    record syntax-kind {
+        id: u32,
+        text: string,
+        is-keyword: bool,
+        is-terminal: bool,
+    }
+
+    record scanner-scope {
+        next-index: u64,
+        lookahead: option<token>,
+    }
+}
+
+interface scanner {
+    use types.{token, scanner-scope};
+
+    resource scanner {
+        create: static func(source: string, index-from: u64) -> scanner;
+        lookahead: func() -> option<token>;
+        shift: func() -> option<token>;
+        scope: func() -> scanner-scope;
+        revert: func(scope: scanner-scope);
+    }
+}
+
+world scanner-world {
+    export types;
+    export scanner;
+}

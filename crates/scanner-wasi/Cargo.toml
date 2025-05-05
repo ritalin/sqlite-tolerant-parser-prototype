@@ -1,0 +1,17 @@
+[package]
+name = "scanner-wasi"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "scanner_app"
+path = "src/bin/scanner_app/main.rs"
+
+[dependencies]
+scanner = { version = "0.1.0", path = "../scanner" }
+sqlite-parser-proto = { path = "../..", features = ["parser_generated"] }
+wit-bindgen = "0.41.0"
+cstree = { workspace = true }
