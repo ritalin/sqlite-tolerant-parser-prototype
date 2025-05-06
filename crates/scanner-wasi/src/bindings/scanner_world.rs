@@ -226,10 +226,10 @@ pub mod exports {
         
         #[doc(hidden)]
         #[allow(non_snake_case)]
-        pub unsafe fn _export_static_scanner_create_cabi<T: GuestScanner>(arg0: *mut u8,arg1: usize,arg2: i64,) -> i32 {#[cfg(target_arch="wasm32")]
+        pub unsafe fn _export_static_scanner_create_cabi<T: GuestScanner>(arg0: *mut u8,arg1: usize,arg2: i32,) -> i32 {#[cfg(target_arch="wasm32")]
         _rt::run_ctors_once();let len0 = arg1;
         let bytes0 = _rt::Vec::from_raw_parts(arg0.cast(), len0, len0);
-        let result1 = T::create(_rt::string_lift(bytes0), arg2 as u64);
+        let result1 = T::create(_rt::string_lift(bytes0), arg2 as u32);
         (result1).take_handle() as i32
       }
       #[doc(hidden)]
@@ -1173,7 +1173,9 @@ pub mod exports {
                   }
 
                   
-                  fn create(source: _rt::String,index_from: u64,) -> Scanner;
+                  /// Create new scanner instance.
+                  /// If you want to skip index for scouece string, pass `index-from` to more `0`.
+                  fn create(source: _rt::String,index_from: u32,) -> Scanner;
                   fn lookahead(&self,) -> Option<Token>;
                   fn shift(&self,) -> Option<Token>;
                   fn scope(&self,) -> ScannerScope;
@@ -1185,7 +1187,7 @@ pub mod exports {
                   ($ty:ident with_types_in $($path_to_types:tt)*) => (const _: () = {
 
                     #[unsafe(export_name = "ritalin:scanner/scanner@0.0.1#[static]scanner.create")]
-                    unsafe extern "C" fn export_static_scanner_create(arg0: *mut u8,arg1: usize,arg2: i64,) -> i32 {
+                    unsafe extern "C" fn export_static_scanner_create(arg0: *mut u8,arg1: usize,arg2: i32,) -> i32 {
                       unsafe { $($path_to_types)*::_export_static_scanner_create_cabi::<<$ty as $($path_to_types)*::Guest>::Scanner>(arg0, arg1, arg2) }
                     }
                     #[unsafe(export_name = "ritalin:scanner/scanner@0.0.1#[method]scanner.lookahead")]
@@ -1526,7 +1528,7 @@ main\x04\x08trailing\x06\x04\0\x05token\x03\0\x07\x01k\x08\x01r\x02\x0anext-inde
 xw\x09lookahead\x09\x04\0\x0dscanner-scope\x03\0\x0a\x04\0\x1britalin:scanner/ty\
 pes@0.0.1\x05\0\x02\x03\0\0\x05token\x02\x03\0\0\x0dscanner-scope\x01B\x11\x02\x03\
 \x02\x01\x01\x04\0\x05token\x03\0\0\x02\x03\x02\x01\x02\x04\0\x0dscanner-scope\x03\
-\0\x02\x04\0\x07scanner\x03\x01\x01i\x04\x01@\x02\x06sources\x0aindex-fromw\0\x05\
+\0\x02\x04\0\x07scanner\x03\x01\x01i\x04\x01@\x02\x06sources\x0aindex-fromy\0\x05\
 \x04\0\x16[static]scanner.create\x01\x06\x01h\x04\x01k\x01\x01@\x01\x04self\x07\0\
 \x08\x04\0\x19[method]scanner.lookahead\x01\x09\x04\0\x15[method]scanner.shift\x01\
 \x09\x01@\x01\x04self\x07\0\x03\x04\0\x15[method]scanner.scope\x01\x0a\x01@\x02\x04\

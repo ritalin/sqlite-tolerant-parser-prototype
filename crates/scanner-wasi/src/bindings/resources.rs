@@ -9,13 +9,13 @@ pub struct ScannerImpl {
 }
 
 impl ScannerImpl {
-    fn new(source: String,index_from: u64) -> ScannerImpl {
+    fn new(source: String,index_from: u32) -> ScannerImpl {
         Self { inner: RefCell::new(Scanner::create(source, index_from as usize)) }
     }
 }
 
 impl scanner::GuestScanner for ScannerImpl {
-    fn create(source: String,index_from: u64,) -> scanner::Scanner {
+    fn create(source: String,index_from: u32,) -> scanner::Scanner {
         scanner::Scanner::new(Self::new(source, index_from))
     }
 
