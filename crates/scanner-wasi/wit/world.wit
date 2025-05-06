@@ -31,7 +31,9 @@ interface scanner {
     use types.{token, scanner-scope};
 
     resource scanner {
-        create: static func(source: string, index-from: u64) -> scanner;
+        // Create new scanner instance.
+        // If you want to skip index for scouece string, pass `index-from` to more `0`.
+        create: static func(source: string, index-from: u32) -> scanner;
         lookahead: func() -> option<token>;
         shift: func() -> option<token>;
         scope: func() -> scanner-scope;
