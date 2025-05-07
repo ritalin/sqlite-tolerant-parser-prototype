@@ -1,4 +1,4 @@
-mod scanner_world;
+pub mod scanner_world;
 mod resources;
 
 use resources::ScannerComponent;

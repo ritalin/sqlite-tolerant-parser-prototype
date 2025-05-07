@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use cstree::RawSyntaxKind;
 use ::scanner::{Scanner};
 use sqlite_parser_proto::SyntaxKind;
-use super::scanner_world::exports::ritalin::scanner::{scanner, types};
+use super::scanner_world::exports::ritalin::scanner::{scanners, types};
 
 pub struct ScannerImpl {
     inner: RefCell<Scanner>
@@ -14,24 +14,24 @@ impl ScannerImpl {
     }
 }
 
-impl scanner::GuestScanner for ScannerImpl {
-    fn create(source: String,index_from: u32,) -> scanner::Scanner {
-        scanner::Scanner::new(Self::new(source, index_from))
+impl scanners::GuestScanner for ScannerImpl {
+    fn create(source: String,index_from: u32,) -> scanners::Scanner {
+        scanners::Scanner::new(Self::new(source, index_from))
     }
 
-    fn lookahead(&self,) -> Option<scanner::Token> {
+    fn lookahead(&self,) -> Option<scanners::Token> {
         self.inner.borrow().lookahead().map(|x| From::from(x.clone()))
     }
 
-    fn shift(&self,) -> Option<scanner::Token> {
+    fn shift(&self,) -> Option<scanners::Token> {
         self.inner.borrow_mut().shift().map(|x| From::from(x.clone()))
     }
 
-    fn scope(&self,) -> scanner::ScannerScope {
+    fn scope(&self,) -> scanners::ScannerScope {
         self.inner.borrow().scope().into()
     }
 
-    fn revert(&self,scope: scanner::ScannerScope,) -> () {
+    fn revert(&self,scope: scanners::ScannerScope,) -> () {
         self.inner.borrow_mut().revert(scope.into());
     }
 }
@@ -69,8 +69,8 @@ impl From<&::scanner::TokenItem> for types::TokenItem {
     fn from(value: &::scanner::TokenItem) -> Self {
         Self { 
             kind: From::from(&value.tag), 
-            offset: value.offset as u64, 
-            len: value.len as u64, 
+            offset: value.offset as u32, 
+            len: value.len as u32, 
             value: value.value.clone(),
         }
     }
@@ -96,16 +96,16 @@ impl From<&types::SyntaxKind> for sqlite_parser_proto::SyntaxKind {
 
 impl From<::scanner::ScannerScope> for types::ScannerScope {
     fn from(value: ::scanner::ScannerScope) -> Self {
-        Self { next_index: value.next_index as u64, lookahead: value.lookahead.map(Into::into) }
+        Self { next_index: value.next_index as u32, lookahead: value.lookahead.map(Into::into) }
     }
 }
 impl From<types::ScannerScope> for ::scanner::ScannerScope {
-    fn from(value: scanner::ScannerScope) -> Self {
+    fn from(value: scanners::ScannerScope) -> Self {
         Self { next_index: value.next_index as usize, lookahead: value.lookahead.map(Into::into) }    
     }
 }
 
 pub struct ScannerComponent;
-impl<'a> scanner::Guest for ScannerComponent {
+impl<'a> scanners::Guest for ScannerComponent {
     type Scanner = ScannerImpl;
 }

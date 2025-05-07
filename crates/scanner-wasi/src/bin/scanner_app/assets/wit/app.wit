@@ -2,6 +2,6 @@ package ritalin:app@0.0.1;
 
 world app-world {
     // include wasi:cli/stdout@0.2.5
-    import ritalin:scanner/scanner@0.0.1;
+    import ritalin:scanner/scanners@0.0.1;
     // import ritalin:scanner/types@0.0.1;
 }

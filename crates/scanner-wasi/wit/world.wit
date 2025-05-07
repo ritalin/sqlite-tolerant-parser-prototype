@@ -9,8 +9,8 @@ interface types {
 
     record token-item {
         kind: syntax-kind,
-        offset: u64,
-        len: u64,
+        offset: u32,
+        len: u32,
         value: option<string>,
     }
 
@@ -22,12 +22,12 @@ interface types {
     }
 
     record scanner-scope {
-        next-index: u64,
+        next-index: u32,
         lookahead: option<token>,
     }
 }
 
-interface scanner {
+interface scanners {
     use types.{token, scanner-scope};
 
     resource scanner {
@@ -43,5 +43,5 @@ interface scanner {
 
 world scanner-world {
     export types;
-    export scanner;
+    export scanners;
 }
