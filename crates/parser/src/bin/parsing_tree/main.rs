@@ -1,11 +1,4 @@
-
-
-use std::collections::HashMap;
-
-use cstree::{syntax::{SyntaxNode, SyntaxToken}, util::NodeOrToken};
-use parser::{AnnotationKey, Parser, SyntaxTree};
-use sqlite_parser_proto::SyntaxKind;
-
+use parser::{Parser, SyntaxTree};
 
 pub fn main() -> Result<(), anyhow::Error> {
     let source = r#"
@@ -41,36 +34,24 @@ pub fn main() -> Result<(), anyhow::Error> {
 }
 
 fn dump_tree(tree: &SyntaxTree) {
-    dump_tree_internal(NodeOrToken::Node(tree.root()), &tree.annotations, 0);
+    dump_tree_internal(tree.root(), 0);
 }
 
-fn dump_tree_internal(node: NodeOrToken<&SyntaxNode<SyntaxKind>, &SyntaxToken<SyntaxKind>>, annotations: &HashMap<AnnotationKey, (parser::NodeId, parser::Annotation)>, indent: usize) {
+fn dump_tree_internal(node: ::parser::SyntaxNode, indent: usize) {
     let range = node.text_range();
     let kind = node.kind();
     let range_str = format!("{} - {}", usize::from(range.start()), usize::from(range.end()));
     let indent_str = std::iter::repeat("  ").take(indent).collect::<String>();
-
-    let key = match node {
-        NodeOrToken::Node(x) => AnnotationKey::from(x),
-        NodeOrToken::Token(x) => AnnotationKey::from(x),
-    };
-
-    let value = match node {
-        NodeOrToken::Node(_) => "".to_string(),
-        NodeOrToken::Token(x) => format!("`{}`", x.resolved().text().replace("\n", r"\n")),
-    };
-
-    let node_type = annotations.get(&key).map(|(_, a)| format!("{:?} ({})", a.node_type, a.state)).unwrap_or("?".to_string());
+    let value = node.value().map(|v| v.replace("\n", r"\n")).unwrap_or_default();
+    let node_type = node.metadata().node_type;
 
     println!("{:<16}{:<24}{}{} ({}) {}", 
-        range_str, node_type,
+        range_str, format!("{:?}", node_type),
         indent_str, kind.text, kind.id, value
     );
 
-    if let NodeOrToken::Node(node) = node {
-        for child in node.children_with_tokens() {
-            dump_tree_internal(child, annotations, indent + 1);
-        }
+    for child in node.children() {
+        dump_tree_internal(child, indent + 1);
     }
 }
 
@@ -112,9 +93,7 @@ mod parser_tests {
         'error_node: {
             assert_eq!(syntax_kind::r#DELETE, node.kind());
 
-            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(node.syntax())) else {
-                panic!("Node annotation for parent must be assigned.");
-            };
+            let annotation = node.metadata();
             assert_eq!(NodeType::Error, annotation.node_type);
             assert_eq!(Some(Recovery::Delete), annotation.recovery);
             break 'error_node;
@@ -139,9 +118,7 @@ mod parser_tests {
         'error_node: {
             assert_eq!(syntax_kind::r#ILLEGAL, error_node.kind());
 
-            let Some(annotation) = tree.get_annotation_of(AnnotationKey::from(error_node.syntax())) else {
-                panic!("Node annotation for parent must be assigned.");
-            };
+            let annotation = error_node.metadata();
             assert_eq!(NodeType::Error, annotation.node_type);
             assert_eq!(Some(Recovery::Shift), annotation.recovery);
             break 'error_node;
@@ -170,7 +147,7 @@ mod parser_tests {
         let inc_parser = parser.incremental(&tree0, 
             parser::EditScope { offset: 7, from_len: 0, to_len: 3 }
         )?;
-        let tree = inc_parser.parse(source)?;
+        let tree = inc_parser.parse(source.to_string())?;
 
         // eprintln!(">>> Dump AnnotationKeys");
         // tree.root().preorder_with_tokens().filter_map(|event| match event {
@@ -211,7 +188,7 @@ mod parser_tests {
         let inc_parser = parser.incremental(&tree0, 
             parser::EditScope { offset: 7, from_len: 1, to_len: 0 }
         )?;
-        let tree = inc_parser.parse(source)?;
+        let tree = inc_parser.parse(source.to_string())?;
 
         dump_tree(&tree);
 
@@ -230,7 +207,7 @@ mod parser_tests {
         let inc_parser = parser.incremental(&tree0, 
             parser::EditScope { offset: 11, from_len: 4, to_len: 7 }, 
         )?;
-        let tree = inc_parser.parse(source)?;
+        let tree = inc_parser.parse(source.to_string())?;
 
         dump_tree(&tree);
         Ok(())
@@ -257,7 +234,7 @@ mod parser_tests {
         let inc_parser = parser.incremental(&tree0, 
             parser::EditScope { offset: 11, from_len: 0, to_len: 12 }, 
         )?;
-        let tree = inc_parser.parse(source)?;
+        let tree = inc_parser.parse(source.to_string())?;
 
         dump_tree(&tree);
         Ok(())

@@ -1198,7 +1198,7 @@ impl IncrementalParser {
         })
     }
 
-    pub fn parse(&self, source: &str) -> Result<SyntaxTree, anyhow::Error> {
+    pub fn parse(&self, source: String) -> Result<SyntaxTree, anyhow::Error> {
         let Some(metadata) = self.tree.get_annotation_of(AnnotationKey::from(&self.edit_node)) else {
             bail!("Invalid state of edit node (kind: {})", self.edit_node.kind().text);
         };
@@ -1235,7 +1235,7 @@ impl IncrementalParser {
             }
         };
 
-        Ok(SyntaxTree{ root: red_node, intern_cache, annotations: new_annotations, ..self.tree.clone() })
+        Ok(SyntaxTree{ root: red_node, intern_cache, annotations: Rc::new(new_annotations), ..self.tree.clone() })
     }
 }
 
@@ -1294,8 +1294,13 @@ fn find_edit_node(tree: &SyntaxTree, edit: &EditScope) -> Option<SyntaxNode<Synt
     let lower_at = TextSize::from(edit.offset);
     let upper_at = TextSize::from(edit.offset.saturating_add(edit.from_len));
 
-    let Some(lower_node) = find_deepest_token_containing(tree.root(), lower_at) else { return None; };
-    let Some(upper_node) = find_deepest_token_containing(tree.root(), upper_at) else { return None; };
+    let root = tree.root();
+    let Some(root_node) = root.as_inner_node() else {
+        return None;
+    };
+
+    let Some(lower_node) = find_deepest_token_containing(root_node, lower_at) else { return None; };
+    let Some(upper_node) = find_deepest_token_containing(root_node, upper_at) else { return None; };
 
     let lower_path = lower_node.prev_token().unwrap_or(lower_node).ancestors().collect::<Vec<_>>().into_iter().rev();
     let upper_path = upper_node.next_token().unwrap_or(upper_node).ancestors().collect::<Vec<_>>().into_iter().rev();
