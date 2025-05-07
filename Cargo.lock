@@ -619,6 +619,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "parser-wasi"
+version = "0.1.0"
+dependencies = [
+ "parser",
+ "scanner-wasi",
+ "wit-bindgen",
+]
+
+[[package]]
 name = "percent-encoding"
 version = "2.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

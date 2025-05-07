@@ -1,0 +1,78 @@
+package ritalin:parser@0.0.1;
+
+interface parsers {
+    use syntax.{tree};
+    type syntax-tree = tree;
+
+    resource parser {
+        constructor();
+        parse: func(source: string) -> result<syntax-tree, parser-error>;
+        incremental: func(tree: syntax-tree, edit: edit-scope) -> result<incremental-parser, parser-error>;
+    }
+
+    variant parser-error {
+        syntax-error(string),
+        incremental-edit-error(string),
+    }
+
+    record edit-scope {
+        offset: u32,
+        from-len: u32,
+        to-len: u32,
+    }
+
+    resource incremental-parser {
+        parse: func(source: string) -> result<syntax-tree, parser-error>;
+    }
+}
+
+interface syntax {
+    use ritalin:scanner/types@0.0.1.{syntax-kind};
+
+    resource tree {
+        root: func() -> node;
+    }
+
+    resource node {
+        metadata: func() -> metadata;
+        offset-start: func() -> u32;
+        offset-end: func() -> u32;
+        value: func() -> option<string>;
+        leading-trivia: func() -> list<node>;
+        traling-trivia: func() -> list<node>;
+        children: func() -> list<node>;
+    }
+
+    enum node-type {
+        token-set,
+        leading-token,
+        trailing-token,
+        main-token,
+        node,
+        error,
+        fatal-error,
+    }
+
+    enum recovery-status {
+        delete,
+        shift,
+    }
+
+    record metadata {
+        kind: syntax-kind,
+        node-type: node-type,
+        state: u64,
+        recovery: option<recovery-status>
+    }
+}
+
+world syntax-interface {
+    export syntax;
+}
+
+world parser-world {
+    // export ritalin:scanner/scanners@0.0.1;
+    export ritalin:scanner/types@0.0.1;
+    export parsers;
+    include syntax-interface;
+}

@@ -7,7 +7,7 @@ edition = "2024"
 members = [
     "tools",
     "crates/generate", 
-    "crates/parser", "crates/scanner", "crates/scanner-wasi",
+    "crates/parser", "crates/scanner", "crates/scanner-wasi", "crates/parser-wasi",
 ]
 
 [[bin]]

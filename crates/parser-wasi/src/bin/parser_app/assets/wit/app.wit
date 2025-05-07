@@ -1,0 +1,6 @@
+package ritalin:parser-app@0.0.1;
+
+world app-world {
+    import ritalin:parser/parsers@0.0.1;
+    import ritalin:parser/syntax@0.0.1;
+}

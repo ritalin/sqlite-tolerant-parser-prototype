@@ -1,0 +1,12 @@
+[package]
+name = "parser-wasi"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+parser = { path = "../parser", version = "0.1.0" }
+scanner-wasi = { path = "../scanner-wasi", version = "0.1.0" }
+wit-bindgen = "0.41.0"

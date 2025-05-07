@@ -1,0 +1,2 @@
+parser = "../../../../../wit"
+scanner = "../../../../../../scanner-wasi/wit"
